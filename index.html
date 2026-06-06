@@ -1,0 +1,304 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AiComp - AI Companion Chat</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Toast notifications -->
+<div id="toast-container"></div>
+
+<div class="container">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1>AiComp</h1>
+        </div>
+
+        <!-- Character selector -->
+        <div class="character-selector">
+            <div class="current-character" onclick="app.showCharacterList()" title="Switch character">
+                <span class="char-avatar" id="current-char-avatar">?</span>
+                <span class="char-name"   id="current-char-name">No Character</span>
+                <span class="char-arrow">&#9662;</span>
+            </div>
+            <button class="icon-btn" onclick="app.openCharacterEditor(null)" title="Create new character">&#65291;</button>
+        </div>
+
+        <button class="new-chat-btn" onclick="app.createNewChat()">&#65291; New Chat</button>
+
+        <div class="chat-history">
+            <div class="history-title">Chats</div>
+            <div id="chat-list"></div>
+        </div>
+
+        <div class="sidebar-footer">
+            <button class="settings-btn" onclick="app.openSettings()">&#9881;&#65039; Settings</button>
+        </div>
+    </aside>
+
+    <!-- MAIN CHAT AREA -->
+    <main class="main-content">
+
+        <div class="chat-header">
+            <div class="chat-header-content">
+                <h2 id="chat-title">AiComp</h2>
+                <p id="chat-subtitle">Select a character to start</p>
+            </div>
+            <div class="chat-header-buttons">
+                <button class="hdr-btn" onclick="app.toggleMemoryPanel()" title="View companion memory">&#129504; Memory</button>
+                <button class="hdr-btn" onclick="app.generateSummary()"   title="Generate summary">&#128203; Summary</button>
+                <button class="hdr-btn" onclick="app.exportCurrentChat()" title="Export chat">&#128228; Export</button>
+                <button class="hdr-btn" onclick="document.getElementById('import-file-header').click()" title="Import chat from file">&#128194; Import</button>
+                <input type="file" id="import-file-header" accept=".json" style="display:none" onchange="app.importChat(this.files[0]); this.value='';">
+            </div>
+        </div>
+
+        <div class="messages-container" id="messages-container">
+            <div class="welcome-section">
+                <h2>Welcome to AiComp</h2>
+                <p>Select a character and start chatting</p>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div id="retry-bar" class="retry-bar hidden">
+                <span class="retry-label">Failed:</span>
+                <span id="retry-message-preview" class="retry-preview"></span>
+                <button class="retry-btn"      onclick="app.retryLastMessage()">&#128260; Retry</button>
+                <button class="icon-btn small" onclick="app.dismissRetry()">&#10005;</button>
+            </div>
+            <div class="input-wrapper">
+                <textarea id="message-input" class="message-input" placeholder="Type your message..." rows="1"></textarea>
+                <button id="send-btn" class="send-btn" onclick="app.sendMessage()">&#128228;</button>
+            </div>
+            <div class="input-info"><small>Enter to send &nbsp;&#183;&nbsp; Shift+Enter for new line</small></div>
+        </div>
+
+    </main>
+
+    <!-- MEMORY PANEL -->
+    <aside class="memory-panel" id="memory-panel">
+        <div class="memory-panel-header">
+            <h3>&#129504; Companion Memory</h3>
+            <button class="icon-btn" onclick="app.toggleMemoryPanel()">&#10005;</button>
+        </div>
+        <div class="memory-panel-body" id="memory-panel-body">
+            <p class="memory-empty">Open a chat to view memory</p>
+        </div>
+        <div class="memory-panel-footer">
+            <button class="btn-secondary small" onclick="app.refreshMemory()">&#128260; Refresh Memory</button>
+        </div>
+    </aside>
+
+</div>
+
+<!-- OVERLAY -->
+<div class="overlay" id="overlay" onclick="app.closeModals()"></div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal" id="settings-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Settings</h2>
+            <button class="close-btn" onclick="app.closeSettings()">&#10005;</button>
+        </div>
+        <div class="modal-body">
+            <div class="setting-group">
+                <label>API Keys (Google Gemini)</label>
+                <div id="api-keys-list" class="api-keys-list"></div>
+                <div class="api-key-form">
+                    <input type="text"     id="new-key-label" class="setting-input" placeholder="Label (e.g. Account 1)">
+                    <input type="password" id="new-key-value" class="setting-input" placeholder="Paste API key...">
+                    <button class="btn-secondary" onclick="app.addApiKeyRow()">Add</button>
+                </div>
+                <small>Keys rotate automatically. Never sent anywhere except Google.</small>
+            </div>
+            <div class="setting-group">
+                <label for="temperature">Temperature (Creativity): <span id="temperature-value">0.7</span></label>
+                <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7" class="slider">
+            </div>
+            <div class="setting-group">
+                <label for="max-tokens">Max Output Tokens (odpowiedź czatu):</label>
+                <div class="context-tokens-wrapper">
+                    <input type="number" id="max-tokens" class="setting-input" value="8192" min="100" max="65536" step="256">
+                </div>
+                <div class="quick-buttons">
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=1024">1K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=2048">2K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=4096">4K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=8192">8K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=16384">16K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=65536">Max</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <label for="memory-tokens">Max Output Tokens (ekstrakcja pamięci):</label>
+                <div class="context-tokens-wrapper">
+                    <input type="number" id="memory-tokens" class="setting-input" value="8192" min="512" max="65536" step="256">
+                </div>
+                <div class="quick-buttons">
+                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=2048">2K</button>
+                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=4096">4K</button>
+                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=8192">8K</button>
+                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=16384">16K</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <label for="summary-tokens">Max Output Tokens (generowanie podsumowania):</label>
+                <div class="context-tokens-wrapper">
+                    <input type="number" id="summary-tokens" class="setting-input" value="8192" min="512" max="65536" step="256">
+                </div>
+                <div class="quick-buttons">
+                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=4096">4K</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=8192">8K</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=16384">16K</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=32768">32K</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <label for="summary-every">Auto-podsumowanie co ile odpowiedzi AI:</label>
+                <div class="context-tokens-wrapper">
+                    <input type="number" id="summary-every" class="setting-input" value="10" min="1" max="100" step="1">
+                    <span class="context-info">odpowiedzi</span>
+                </div>
+                <div class="quick-buttons">
+                    <button class="quick-btn" onclick="document.getElementById('summary-every').value=5">5</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-every').value=10">10</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-every').value=20">20</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-every').value=50">50</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-every').value=100">100</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <label for="context-tokens">Context Tokens (chat history):</label>
+                <div class="context-tokens-wrapper">
+                    <input type="number" id="context-tokens" class="setting-input" value="2000" min="100" max="1000000" step="1000">
+                    <span class="context-info">/ 1 000 000</span>
+                </div>
+                <div class="quick-buttons">
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=2000">2K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=4000">4K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=16000">16K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=32000">32K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=100000">100K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=1000000">Max</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <label>Import Chat</label>
+                <input type="file" id="import-file" accept=".json" style="display:none" onchange="app.importChat(this.files[0])">
+                <button class="btn-secondary" onclick="document.getElementById('import-file').click()">&#128194; Import Chat JSON</button>
+            </div>
+            <div class="setting-group setting-group--row">
+                <label for="debug-prompts">Log prompts to console</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="debug-prompts">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="app.closeSettings()">Cancel</button>
+            <button class="btn-primary"   onclick="app.saveSettings()">Save Settings</button>
+        </div>
+    </div>
+</div>
+
+<!-- CHARACTER EDITOR (full-screen) -->
+<div class="modal fullscreen-modal" id="character-modal">
+    <div class="modal-content fullscreen-content">
+        <div class="modal-header">
+            <h2 id="character-modal-title">New Character</h2>
+            <button class="close-btn" onclick="app.closeCharacterEditor()">&#10005;</button>
+        </div>
+        <div class="modal-body character-editor-body">
+            <div class="char-editor-grid">
+                <div class="setting-group">
+                    <label for="char-name">Name *</label>
+                    <input type="text" id="char-name" class="setting-input" placeholder="Character name">
+                </div>
+                <div class="setting-group">
+                    <label for="char-prompt">Character Prompt (Core Personality) *</label>
+                    <textarea id="char-prompt" class="setting-input char-textarea" rows="5"
+                        placeholder="You are... - define core personality and behaviour"></textarea>
+                </div>
+                <div class="setting-group">
+                    <label for="char-welcome">Welcome Message</label>
+                    <textarea id="char-welcome" class="setting-input char-textarea" rows="3"
+                        placeholder="What the character says at the start of every new chat"></textarea>
+                </div>
+                <div class="setting-group">
+                    <label for="char-scenario">Scenario</label>
+                    <textarea id="char-scenario" class="setting-input char-textarea" rows="4"
+                        placeholder="Describe the setting, context, or situation"></textarea>
+                </div>
+                <div class="setting-group">
+                    <label for="char-details">Detailed Character Information</label>
+                    <textarea id="char-details" class="setting-input char-textarea" rows="7"
+                        placeholder="Physical description, backstory, personality traits, skills...&#10;This text is also imported into the companion memory."></textarea>
+                </div>
+                <div class="setting-group">
+                    <label for="char-dialogue">Dialogue Examples</label>
+                    <textarea id="char-dialogue" class="setting-input char-textarea" rows="5"
+                        placeholder="User: Hello!&#10;Character: Hi there! Great to meet you!"></textarea>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-danger" id="char-delete-btn" onclick="app.deleteCurrentCharacter()" style="display:none">Delete Character</button>
+            <div class="footer-spacer"></div>
+            <button class="btn-secondary" onclick="app.closeCharacterEditor()">Cancel</button>
+            <button class="btn-primary"   onclick="app.saveCharacter()">Save Character</button>
+        </div>
+    </div>
+</div>
+
+<!-- CHARACTER LIST MODAL -->
+<div class="modal" id="character-list-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Characters</h2>
+            <button class="close-btn" onclick="app.closeCharacterList()">&#10005;</button>
+        </div>
+        <div class="modal-body" id="character-list-body"></div>
+        <div class="modal-footer">
+            <button class="btn-primary" onclick="app.closeCharacterList(); app.openCharacterEditor(null)">+ New Character</button>
+        </div>
+    </div>
+</div>
+
+<!-- SUMMARY MODAL -->
+<div class="modal" id="summary-modal">
+    <div class="modal-content wide-modal">
+        <div class="modal-header">
+            <h2>Chat Summary</h2>
+            <button class="close-btn" onclick="app.closeSummaryModal()">&#10005;</button>
+        </div>
+        <div class="modal-body" id="summary-content">
+            <div class="summary-loading">
+                <div class="typing-indicator">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+                <p>Generating...</p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <span id="summary-info" class="summary-info"></span>
+            <div class="footer-spacer"></div>
+            <button class="btn-secondary small" onclick="app.clearChatSummary(); app.closeSummaryModal()">&#128465; Clear saved</button>
+            <button class="btn-secondary" onclick="app.copySummary()">&#128203; Copy</button>
+            <button class="btn-secondary" onclick="app.closeSummaryModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<script type="module" src="scripts/main.js"></script>
+</body>
+</html>
