@@ -1,6 +1,6 @@
 import { dbGet, dbPut, dbDelete } from './db.js';
 
-const SUMMARY_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
+const SUMMARY_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
 
 /** How many AI responses between automatic summaries. */
 export const AI_RESPONSES_PER_SUMMARY = 10;

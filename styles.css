@@ -173,6 +173,7 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
 .messages-container {
     flex: 1; overflow-y: auto; padding: 20px;
     display: flex; flex-direction: column; gap: 14px;
+    font-size: 14px; /* default — overridden by JS via inline style */
 }
 .messages-container::-webkit-scrollbar { width: 6px; }
 .messages-container::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
@@ -195,7 +196,7 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
 .message-content {
     padding: 11px 15px; border-radius: 12px;
     word-wrap: break-word; line-height: 1.55;
-    color: var(--text-secondary); font-size: 14px;
+    color: var(--text-secondary);
 }
 .message.user .message-content {
     background: var(--message-user); color: var(--text-primary);

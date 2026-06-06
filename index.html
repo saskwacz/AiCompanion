@@ -194,6 +194,19 @@
                 <input type="file" id="import-file" accept=".json" style="display:none" onchange="app.importChat(this.files[0])">
                 <button class="btn-secondary" onclick="document.getElementById('import-file').click()">&#128194; Import Chat JSON</button>
             </div>
+            <div class="setting-group">
+                <label for="chat-font-size">Rozmiar czcionki czatu: <span id="chat-font-size-value">14</span> px</label>
+                <input type="range" id="chat-font-size" min="8" max="64" step="1" value="14" class="slider"
+                       oninput="document.getElementById('chat-font-size-value').textContent = this.value">
+                <div class="quick-buttons">
+                    <button class="quick-btn" onclick="app.setChatFontSize(10)">10</button>
+                    <button class="quick-btn" onclick="app.setChatFontSize(12)">12</button>
+                    <button class="quick-btn" onclick="app.setChatFontSize(14)">14</button>
+                    <button class="quick-btn" onclick="app.setChatFontSize(16)">16</button>
+                    <button class="quick-btn" onclick="app.setChatFontSize(20)">20</button>
+                    <button class="quick-btn" onclick="app.setChatFontSize(24)">24</button>
+                </div>
+            </div>
             <div class="setting-group setting-group--row">
                 <label for="debug-prompts">Log prompts to console</label>
                 <label class="toggle-switch">

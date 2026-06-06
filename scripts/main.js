@@ -50,6 +50,7 @@ async function init() {
         await openDB();
         settings = await loadSettings();
         window.DEBUG_PROMPTS = !!settings.debugPrompts;
+        applyChatFontSize(settings.chatFontSize ?? 14);
 
         const chars = await getAllCharacters();
         if (chars.length === 0) {
@@ -389,6 +390,11 @@ function hideTypingIndicator() {
     document.querySelector('.typing-message')?.remove();
 }
 
+function applyChatFontSize(size) {
+    const el = document.getElementById('messages-container');
+    if (el) el.style.fontSize = `${size}px`;
+}
+
 function renderChatList(chats) {
     const el = document.getElementById('chat-list');
     if (!el) return;
@@ -532,6 +538,11 @@ async function openSettings() {
     if (st)  st.value      = settings.summaryTokens ?? 8192;
     if (se)  se.value      = settings.summaryEvery  ?? 10;
     if (dp)  dp.checked    = !!settings.debugPrompts;
+    const fs = document.getElementById('chat-font-size');
+    const fsVal = document.getElementById('chat-font-size-value');
+    const curFs = settings.chatFontSize ?? 14;
+    if (fs) fs.value = curFs;
+    if (fsVal) fsVal.textContent = curFs;
     renderApiKeysList();
     openModal('settings-modal');
 }
@@ -585,6 +596,9 @@ async function handleSaveSettings() {
     const dp = document.getElementById('debug-prompts');
     if (dp)   settings.debugPrompts  = dp.checked;
     window.DEBUG_PROMPTS = !!settings.debugPrompts;
+    const fs = document.getElementById('chat-font-size');
+    if (fs) settings.chatFontSize = parseInt(fs.value);
+    applyChatFontSize(settings.chatFontSize ?? 14);
     await persistSettings(settings);
     closeModal('settings-modal');
     showToast('Settings saved', 'success');
@@ -920,6 +934,14 @@ window.app = {
     closeLightbox() {
         const lb = document.getElementById('image-lightbox');
         if (lb) lb.style.display = 'none';
+    },
+
+    setChatFontSize(size) {
+        const fs    = document.getElementById('chat-font-size');
+        const fsVal = document.getElementById('chat-font-size-value');
+        if (fs)    fs.value          = size;
+        if (fsVal) fsVal.textContent = size;
+        applyChatFontSize(size);
     },
 
     retryLastMessage: () => {

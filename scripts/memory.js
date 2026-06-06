@@ -1,6 +1,6 @@
 import { dbGet, dbPut } from './db.js';
 
-const MEMORY_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
+const MEMORY_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
 
 // ============ EMPTY TEMPLATE ============
 // Each item shape: { text: string, count: number }

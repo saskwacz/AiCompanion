@@ -7,6 +7,7 @@ const DEFAULTS = {
     memoryTokens:  8192,   // max output tokens for memory extraction calls
     summaryTokens: 8192,   // max output tokens for summary generation
     summaryEvery:  10,     // auto-summary every N AI responses
+    chatFontSize:  14,     // chat message font size in px
     apiKeys:       [],   // [{ label, key }]
     apiKeyIndex:   0,
     debugPrompts:  false,
