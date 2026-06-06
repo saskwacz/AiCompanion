@@ -392,6 +392,15 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
 .toast-success { background: var(--success-color); }
 .toast-error   { background: var(--error-color); }
 
+/* ============ SETTINGS SECTIONS ============ */
+.settings-section-header {
+    font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--primary-color); padding: 10px 0 6px;
+    border-bottom: 1px solid var(--border-color);
+    margin: 18px 0 10px;
+}
+.settings-section-header:first-child { margin-top: 0; }
+
 /* ============ MODAL ============ */
 .modal {
     display: none; position: fixed; top: 50%; left: 50%;

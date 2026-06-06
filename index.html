@@ -108,56 +108,25 @@
             <button class="close-btn" onclick="app.closeSettings()">&#10005;</button>
         </div>
         <div class="modal-body">
-            <div class="setting-group">
-                <label>API Keys (Google Gemini)</label>
-                <div id="api-keys-list" class="api-keys-list"></div>
-                <div class="api-key-form">
-                    <input type="text"     id="new-key-label" class="setting-input" placeholder="Label (e.g. Account 1)">
-                    <input type="password" id="new-key-value" class="setting-input" placeholder="Paste API key...">
-                    <button class="btn-secondary" onclick="app.addApiKeyRow()">Add</button>
-                </div>
-                <small>Keys rotate automatically. Never sent anywhere except Google.</small>
-            </div>
+            <!-- ═══ OGÓLNE ═══ -->
+            <div class="settings-section-header">&#9881;&#65039; Ogólne</div>
             <div class="setting-group">
                 <label for="temperature">Temperature (Creativity): <span id="temperature-value">0.7</span></label>
                 <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7" class="slider">
             </div>
             <div class="setting-group">
-                <label for="max-tokens">Max Output Tokens (odpowiedź czatu):</label>
+                <label for="context-tokens">Context Tokens (historia czatu):</label>
                 <div class="context-tokens-wrapper">
-                    <input type="number" id="max-tokens" class="setting-input" value="8192" min="100" max="65536" step="256">
+                    <input type="number" id="context-tokens" class="setting-input" value="2000" min="100" max="1000000" step="1000">
+                    <span class="context-info">/ 1 000 000</span>
                 </div>
                 <div class="quick-buttons">
-                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=1024">1K</button>
-                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=2048">2K</button>
-                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=4096">4K</button>
-                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=8192">8K</button>
-                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=16384">16K</button>
-                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=65536">Max</button>
-                </div>
-            </div>
-            <div class="setting-group">
-                <label for="memory-tokens">Max Output Tokens (ekstrakcja pamięci):</label>
-                <div class="context-tokens-wrapper">
-                    <input type="number" id="memory-tokens" class="setting-input" value="8192" min="512" max="65536" step="256">
-                </div>
-                <div class="quick-buttons">
-                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=2048">2K</button>
-                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=4096">4K</button>
-                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=8192">8K</button>
-                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=16384">16K</button>
-                </div>
-            </div>
-            <div class="setting-group">
-                <label for="summary-tokens">Max Output Tokens (generowanie podsumowania):</label>
-                <div class="context-tokens-wrapper">
-                    <input type="number" id="summary-tokens" class="setting-input" value="8192" min="512" max="65536" step="256">
-                </div>
-                <div class="quick-buttons">
-                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=4096">4K</button>
-                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=8192">8K</button>
-                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=16384">16K</button>
-                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=32768">32K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=2000">2K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=4000">4K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=16000">16K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=32000">32K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=100000">100K</button>
+                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=1000000">Max</button>
                 </div>
             </div>
             <div class="setting-group">
@@ -175,26 +144,6 @@
                 </div>
             </div>
             <div class="setting-group">
-                <label for="context-tokens">Context Tokens (chat history):</label>
-                <div class="context-tokens-wrapper">
-                    <input type="number" id="context-tokens" class="setting-input" value="2000" min="100" max="1000000" step="1000">
-                    <span class="context-info">/ 1 000 000</span>
-                </div>
-                <div class="quick-buttons">
-                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=2000">2K</button>
-                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=4000">4K</button>
-                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=16000">16K</button>
-                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=32000">32K</button>
-                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=100000">100K</button>
-                    <button class="quick-btn" onclick="document.getElementById('context-tokens').value=1000000">Max</button>
-                </div>
-            </div>
-            <div class="setting-group">
-                <label>Import Chat</label>
-                <input type="file" id="import-file" accept=".json" style="display:none" onchange="app.importChat(this.files[0])">
-                <button class="btn-secondary" onclick="document.getElementById('import-file').click()">&#128194; Import Chat JSON</button>
-            </div>
-            <div class="setting-group">
                 <label for="chat-font-size">Rozmiar czcionki czatu: <span id="chat-font-size-value">14</span> px</label>
                 <input type="range" id="chat-font-size" min="8" max="64" step="1" value="14" class="slider"
                        oninput="document.getElementById('chat-font-size-value').textContent = this.value">
@@ -207,12 +156,144 @@
                     <button class="quick-btn" onclick="app.setChatFontSize(24)">24</button>
                 </div>
             </div>
+            <div class="setting-group">
+                <label>Import Chat</label>
+                <input type="file" id="import-file" accept=".json" style="display:none" onchange="app.importChat(this.files[0])">
+                <button class="btn-secondary" onclick="document.getElementById('import-file').click()">&#128194; Import Chat JSON</button>
+            </div>
             <div class="setting-group setting-group--row">
                 <label for="debug-prompts">Log prompts to console</label>
                 <label class="toggle-switch">
                     <input type="checkbox" id="debug-prompts">
                     <span class="toggle-slider"></span>
                 </label>
+            </div>
+
+            <!-- ═══ DOSTAWCY ═══ -->
+            <div class="settings-section-header">&#128257; Dostawcy API</div>
+            <div class="setting-group">
+                <label for="provider-chat">Czat (odpowiedzi)</label>
+                <select id="provider-chat" class="setting-input">
+                    <option value="gemini">Gemini</option>
+                    <option value="groq">Groq</option>
+                </select>
+            </div>
+            <div class="setting-group">
+                <label for="provider-memory">Pamięć (ekstrakcja)</label>
+                <select id="provider-memory" class="setting-input">
+                    <option value="gemini">Gemini</option>
+                    <option value="groq">Groq</option>
+                </select>
+            </div>
+            <div class="setting-group">
+                <label for="provider-summary">Podsumowanie</label>
+                <select id="provider-summary" class="setting-input">
+                    <option value="gemini">Gemini</option>
+                    <option value="groq">Groq</option>
+                </select>
+            </div>
+
+            <!-- ═══ GEMINI ═══ -->
+            <div class="settings-section-header">&#128171; Gemini</div>
+            <div class="setting-group">
+                <label>Klucze API (Google Gemini)</label>
+                <div id="api-keys-list" class="api-keys-list"></div>
+                <div class="api-key-form">
+                    <input type="text"     id="new-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                    <input type="password" id="new-key-value" class="setting-input" placeholder="Wklej klucz API...">
+                    <button class="btn-secondary" onclick="app.addApiKeyRow()">Dodaj</button>
+                </div>
+                <small>Klucze rotują losowo. Nigdy nie wysyłane poza Google.</small>
+            </div>
+            <div class="setting-group">
+                <label for="max-tokens">Max Output Tokens (czat):</label>
+                <div class="context-tokens-wrapper">
+                    <input type="number" id="max-tokens" class="setting-input" value="8192" min="100" max="65536" step="256">
+                </div>
+                <div class="quick-buttons">
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=1024">1K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=2048">2K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=4096">4K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=8192">8K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=16384">16K</button>
+                    <button class="quick-btn" onclick="document.getElementById('max-tokens').value=65536">Max</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <label for="memory-tokens">Max Output Tokens (pamięć):</label>
+                <div class="context-tokens-wrapper">
+                    <input type="number" id="memory-tokens" class="setting-input" value="8192" min="512" max="65536" step="256">
+                </div>
+                <div class="quick-buttons">
+                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=2048">2K</button>
+                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=4096">4K</button>
+                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=8192">8K</button>
+                    <button class="quick-btn" onclick="document.getElementById('memory-tokens').value=16384">16K</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <label for="summary-tokens">Max Output Tokens (podsumowanie):</label>
+                <div class="context-tokens-wrapper">
+                    <input type="number" id="summary-tokens" class="setting-input" value="8192" min="512" max="65536" step="256">
+                </div>
+                <div class="quick-buttons">
+                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=4096">4K</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=8192">8K</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=16384">16K</button>
+                    <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=32768">32K</button>
+                </div>
+            </div>
+
+            <!-- ═══ GROQ ═══ -->
+            <div class="settings-section-header">&#9889; Groq</div>
+            <div class="setting-group">
+                <label>Klucze API (Groq)</label>
+                <div id="groq-keys-list" class="api-keys-list"></div>
+                <div class="api-key-form">
+                    <input type="text"     id="new-groq-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                    <input type="password" id="new-groq-value" class="setting-input" placeholder="Wklej klucz Groq...">
+                    <button class="btn-secondary" onclick="app.addGroqKeyRow()">Dodaj</button>
+                </div>
+                <small>Klucze rotują losowo. Nigdy nie wysyłane poza Groq.</small>
+            </div>
+            <div class="setting-group">
+                <label for="groq-chat-model">Model — czat</label>
+                <select id="groq-chat-model" class="setting-input">
+                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+                    <option value="llama3-8b-8192">llama3-8b-8192</option>
+                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+                    <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
+                    <option value="gemma2-9b-it">gemma2-9b-it</option>
+                    <option value="meta-llama/llama-4-scout-17b-16e-instruct">meta-llama/llama-4-scout-17b-16e-instruct</option>
+                    <option value="groq/compound">groq/compound</option>
+                    <option value="groq/compound-mini">gemma2-9b-it</option>
+                </select>
+            </div>
+            <div class="setting-group">
+                <label for="groq-memory-model">Model — pamięć</label>
+                <select id="groq-memory-model" class="setting-input">
+                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+                    <option value="llama3-8b-8192">llama3-8b-8192</option>
+                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+                    <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
+                    <option value="gemma2-9b-it">gemma2-9b-it</option>
+                    <option value="meta-llama/llama-4-scout-17b-16e-instruct">meta-llama/llama-4-scout-17b-16e-instruct</option>
+                    <option value="groq/compound">groq/compound</option>
+                    <option value="groq/compound-mini">gemma2-9b-it</option>
+                </select>
+            </div>
+            <div class="setting-group">
+                <label for="groq-summary-model">Model — podsumowanie</label>
+                <select id="groq-summary-model" class="setting-input">
+                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+                    <option value="llama3-8b-8192">llama3-8b-8192</option>
+                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+                    <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
+                    <option value="gemma2-9b-it">gemma2-9b-it</option>
+                    <option value="meta-llama/llama-4-scout-17b-16e-instruct">meta-llama/llama-4-scout-17b-16e-instruct</option>
+                    <option value="groq/compound">groq/compound</option>
+                    <option value="groq/compound-mini">gemma2-9b-it</option>
+                </select>
             </div>
         </div>
         <div class="modal-footer">

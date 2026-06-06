@@ -4,12 +4,22 @@ const DEFAULTS = {
     temperature:   0.7,
     maxTokens:     8192,
     contextTokens: 2000,
-    memoryTokens:  8192,   // max output tokens for memory extraction calls
-    summaryTokens: 8192,   // max output tokens for summary generation
-    summaryEvery:  10,     // auto-summary every N AI responses
-    chatFontSize:  14,     // chat message font size in px
-    apiKeys:       [],   // [{ label, key }]
+    memoryTokens:  8192,
+    summaryTokens: 8192,
+    summaryEvery:  10,
+    chatFontSize:  14,
+    // Gemini keys
+    apiKeys:       [],
     apiKeyIndex:   0,
+    // Groq keys & models
+    groqApiKeys:       [],
+    groqChatModel:     'llama-3.3-70b-versatile',
+    groqMemoryModel:   'llama-3.3-70b-versatile',
+    groqSummaryModel:  'llama-3.3-70b-versatile',
+    // Provider selection
+    chatProvider:    'gemini',   // 'gemini' | 'groq'
+    memoryProvider:  'gemini',
+    summaryProvider: 'gemini',
     debugPrompts:  false,
 };
 
@@ -38,5 +48,14 @@ export function getShuffledApiKeys(s) {
         const j = Math.floor(Math.random() * (i + 1));
         [keys[i], keys[j]] = [keys[j], keys[i]];
     }
-    return keys; // [{label, key}]
+    return keys;
+}
+
+export function getShuffledGroqApiKeys(s) {
+    const keys = (s.groqApiKeys || []).filter(k => k.key).slice();
+    for (let i = keys.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [keys[i], keys[j]] = [keys[j], keys[i]];
+    }
+    return keys;
 }

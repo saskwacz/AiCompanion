@@ -1,4 +1,5 @@
 import { dbGet, dbPut, dbDelete } from './db.js';
+import { callGroqForSummary }    from './groq.js';
 
 const SUMMARY_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
 
@@ -43,7 +44,7 @@ export function shouldAutoSummarize(messages, existingSummary, everyN = AI_RESPO
  *
  * Saves the result to IndexedDB and returns the new summary record.
  */
-export async function generateAndSaveSummary(chatId, messages, character, existingSummary, apiKey, maxOutputTokens = 8192) {
+export async function generateAndSaveSummary(chatId, messages, character, existingSummary, apiKey, maxOutputTokens = 8192, providerConfig = null) {
     // Summarise everything except the tail kept verbatim
     const cutoff     = Math.max(0, messages.length - RECENT_WINDOW);
     const toSummarise = messages.slice(0, cutoff);
@@ -78,6 +79,21 @@ ${convText}`;
 
     const items = Array.isArray(apiKey) ? apiKey : [apiKey];
     let text, lastErr;
+
+    // ---- Groq path ----
+    if (providerConfig?.provider === 'groq') {
+        text = await callGroqForSummary({
+            apiKey:          providerConfig.keys,
+            prompt,
+            maxOutputTokens,
+            model:           providerConfig.model,
+        });
+        const record = { chatId, text, upToMessageCount: cutoff, createdAt: Date.now() };
+        await saveSummaryForChat(chatId, text, cutoff);
+        return record;
+    }
+
+    // ---- Gemini path ----
     for (const item of items) {
         const key   = typeof item === 'string' ? item : item.key;
         const label = typeof item === 'string' ? `…${key.slice(-6)}` : (item.label || `…${key.slice(-6)}`);

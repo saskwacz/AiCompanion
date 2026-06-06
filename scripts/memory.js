@@ -1,4 +1,5 @@
 import { dbGet, dbPut } from './db.js';
+import { callGroqForMemory } from './groq.js';
 
 const MEMORY_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
 
@@ -100,7 +101,16 @@ export function memoryToContext(mem) {
 }
 
 // ============ INTERNAL API CALL ============
-async function callMemoryModel(prompt, apiKey, maxOutputTokens = 4096) {
+// providerConfig: null = Gemini (default), or { provider:'groq', keys, model }
+async function callMemoryModel(prompt, apiKey, maxOutputTokens = 4096, providerConfig = null) {
+    if (providerConfig?.provider === 'groq') {
+        return callGroqForMemory({
+            prompt,
+            apiKey:          providerConfig.keys,
+            maxOutputTokens,
+            model:           providerConfig.model,
+        });
+    }
     const items = Array.isArray(apiKey) ? apiKey : [apiKey];
     let lastErr;
     for (const item of items) {
@@ -275,13 +285,13 @@ Zasady:
 }
 
 // ============ UPDATE MEMORY AFTER EXCHANGE ============
-export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, character, recentMessages = [], maxOutputTokens = 8192) {
+export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, character, recentMessages = [], maxOutputTokens = 8192, providerConfig = null) {
     const existing     = await getMemoryForChat(chatId);
     const exchangeText = userMsg + ' ' + aiMsg;
     const prompt       = buildUpdatePrompt(existing, character, recentMessages, userMsg, aiMsg);
 
     try {
-        const raw = await callMemoryModel(prompt, apiKey, maxOutputTokens);
+        const raw = await callMemoryModel(prompt, apiKey, maxOutputTokens, providerConfig);
 
         // Normalize: model may return { user:{facts,..}, character:{charFacts,..} }
         // OR a flat object { facts, preferences, ..., charFacts, ... }
@@ -330,7 +340,7 @@ export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, c
 
 // ============ SEED / REFRESH FROM CHARACTER DEFINITION ============
 // Runs after save/edit of character to populate its self-knowledge.
-export async function seedMemoryFromCharacter(chatId, character, apiKey, existingMemory, maxOutputTokens = 8192) {
+export async function seedMemoryFromCharacter(chatId, character, apiKey, existingMemory, maxOutputTokens = 8192, providerConfig = null) {
     const hasContent = character.characterDetails || character.scenario || character.prompt;
     if (!hasContent) return;
 
@@ -361,7 +371,7 @@ Zasady:
 - Zwróć TYLKO prawidłowy obiekt JSON z dokładnie tymi 5 kluczami. Żadnego innego tekstu.`;
 
     try {
-        const raw = await callMemoryModel(prompt, apiKey, maxOutputTokens);
+        const raw = await callMemoryModel(prompt, apiKey, maxOutputTokens, providerConfig);
         const et  = [character.prompt, character.scenario,
                       character.characterDetails, character.dialogueExamples].filter(Boolean).join(' ');
         // Normalize nested/flat and plain strings/{text,count} objects
