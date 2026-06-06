@@ -320,7 +320,7 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
     border-left: 1px solid var(--border-color);
     display: flex; flex-direction: column; flex-shrink: 0;
 }
-.memory-panel.open { width: 290px; }
+.memory-panel.open { width: 33%; }
 
 .memory-panel-header {
     padding: 14px 16px; border-bottom: 1px solid var(--border-color);
