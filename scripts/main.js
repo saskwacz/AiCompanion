@@ -391,8 +391,9 @@ function hideTypingIndicator() {
 }
 
 function applyChatFontSize(size) {
-    const el = document.getElementById('messages-container');
-    if (el) el.style.fontSize = `${size}px`;
+    // Set a single CSS custom property on :root — all referenced rules pick it up automatically,
+    // including dynamically-rendered memory panel content that would lose inline styles on re-render.
+    document.documentElement.style.setProperty('--chat-font-size', `${size}px`);
 }
 
 function renderChatList(chats) {
