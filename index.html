@@ -218,6 +218,22 @@
         </div>
         <div class="modal-body character-editor-body">
             <div class="char-editor-grid">
+                <div class="setting-group char-avatar-group">
+                    <label>Zdjęcie postaci</label>
+                    <div class="char-avatar-picker">
+                        <div class="char-avatar-preview" id="char-avatar-preview">
+                            <span class="char-avatar-placeholder">Brak zdjęcia</span>
+                        </div>
+                        <div class="char-avatar-actions">
+                            <button type="button" class="btn-secondary small"
+                                    onclick="document.getElementById('char-avatar-input').click()">&#128247; Wybierz zdjęcie</button>
+                            <button type="button" class="btn-secondary small" id="char-avatar-remove"
+                                    onclick="app.removeCharacterAvatar()" style="display:none">&#10005; Usuń</button>
+                        </div>
+                    </div>
+                    <input type="file" id="char-avatar-input" accept="image/*" style="display:none"
+                           onchange="app.previewCharacterAvatar(this)">
+                </div>
                 <div class="setting-group">
                     <label for="char-name">Name *</label>
                     <input type="text" id="char-name" class="setting-input" placeholder="Character name">
@@ -300,5 +316,11 @@
 </div>
 
 <script type="module" src="scripts/main.js"></script>
+
+<!-- IMAGE LIGHTBOX -->
+<div id="image-lightbox" class="lightbox-overlay" style="display:none" onclick="app.closeLightbox()">
+    <button class="lightbox-close" onclick="app.closeLightbox()">&#10005;</button>
+    <img id="lightbox-img" class="lightbox-img" alt="Character photo" onclick="event.stopPropagation()">
+</div>
 </body>
 </html>

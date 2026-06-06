@@ -28,6 +28,18 @@ export async function deleteCharacterById(id) { await dbDelete('characters', id)
 export async function getCharacterById(id)    { return dbGet('characters', id); }
 export async function getAllCharacters()       { return dbGetAll('characters'); }
 
+// ============ AVATAR ============
+export async function saveCharacterAvatar(characterId, blob) {
+    await dbPut('avatars', { characterId, blob });
+}
+export async function getCharacterAvatar(characterId) {
+    const r = await dbGet('avatars', characterId);
+    return r?.blob ?? null;
+}
+export async function deleteCharacterAvatar(characterId) {
+    await dbDelete('avatars', characterId);
+}
+
 /** Assembles the system prompt including optional memory context.
  *  Memory (structured character + user knowledge) is placed FIRST.
  *  Raw 'prompt' and 'characterDetails' fields are NOT repeated here —

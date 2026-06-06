@@ -50,6 +50,7 @@ function norm(s) {
 function mergeItems(existingItems, newStrings, exchangeText = '') {
     if (!newStrings.length) return existingItems; // preserve when LLM has no updates for this field
     const exNorm = norm(exchangeText);
+    const now    = Date.now();
     return newStrings.map(text => {
         const keywords = norm(text).split(/\s+/).filter(w => w.length > 3);
         const match    = existingItems.find(item => {
@@ -58,7 +59,8 @@ function mergeItems(existingItems, newStrings, exchangeText = '') {
         });
         const base      = match ? (match.count || 1) : 0;
         const mentioned = keywords.some(w => exNorm.includes(w));
-        return { text, count: base + (mentioned ? 1 : 1) };
+        const firstSeen = match?.firstSeen ?? now; // preserve original timestamp
+        return { text, count: base + (mentioned ? 1 : 1), firstSeen };
     });
 }
 

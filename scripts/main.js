@@ -1,7 +1,8 @@
 import { openDB }                                                      from './db.js';
 import { loadSettings, persistSettings, getShuffledApiKeys }          from './settings.js';
 import { createCharacter, updateCharacter, deleteCharacterById,
-         getCharacterById, getAllCharacters, buildSystemPrompt }       from './characters.js';
+         getCharacterById, getAllCharacters, buildSystemPrompt,
+         saveCharacterAvatar, getCharacterAvatar, deleteCharacterAvatar } from './characters.js';
 import { createChat, updateChat, deleteChatById,
          getChatById, getChatsForCharacter }                           from './chats.js';
 import { addMessage, getMessagesForChat, deleteMessageById,
@@ -28,6 +29,8 @@ let memoryPanelOpen      = false;
 let editingCharId        = null;
 let aiResponseCount      = 0;     // counts AI replies; memory update every N
 let pendingRequests      = 0;     // counts in-flight LLM requests (chat + memory + summary)
+let currentCharacterAvatarUrl = null; // Object URL for current character's avatar blob
+let _pendingAvatarBlob   = null;  // null=no change, false=delete, File=new blob
 
 const MEMORY_UPDATE_EVERY = 1;    // update memory after every AI response
 
@@ -79,14 +82,48 @@ function setupEventListeners() {
 }
 
 // ============ CHARACTER MANAGEMENT ============
+async function loadCharacterAvatar(charId) {
+    if (currentCharacterAvatarUrl) {
+        URL.revokeObjectURL(currentCharacterAvatarUrl);
+        currentCharacterAvatarUrl = null;
+    }
+    if (charId) {
+        const blob = await getCharacterAvatar(charId);
+        if (blob) currentCharacterAvatarUrl = URL.createObjectURL(blob);
+    }
+}
+
+function _showAvatarEditorPreview(url) {
+    const preview   = document.getElementById('char-avatar-preview');
+    const removeBtn = document.getElementById('char-avatar-remove');
+    if (!preview) return;
+    if (url) {
+        preview.innerHTML = `<img src="${url}" class="char-avatar-preview-img" alt="Avatar">`;
+        if (removeBtn) removeBtn.style.display = '';
+    } else {
+        preview.innerHTML = `<span class="char-avatar-placeholder">Brak zdjęcia</span>`;
+        if (removeBtn) removeBtn.style.display = 'none';
+    }
+}
+
 async function selectCharacter(charId) {
     currentCharacter = await getCharacterById(charId);
     if (!currentCharacter) return;
 
+    // Load avatar and update sidebar
+    await loadCharacterAvatar(charId);
+
     const el = document.getElementById('current-char-name');
     const av = document.getElementById('current-char-avatar');
     if (el) el.textContent = currentCharacter.name;
-    if (av) av.textContent = (currentCharacter.name[0] || '?').toUpperCase();
+    if (av) {
+        if (currentCharacterAvatarUrl) {
+            av.innerHTML = `<img src="${currentCharacterAvatarUrl}" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+        } else {
+            av.innerHTML = '';
+            av.textContent = (currentCharacter.name[0] || '?').toUpperCase();
+        }
+    }
 
     const chats = await getChatsForCharacter(charId);
     renderChatList(chats);
@@ -314,9 +351,13 @@ function renderMessages() {
     container.innerHTML = currentMessages.map(msg => {
         const isUser = msg.role === 'user';
         const time   = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const avatarHtml = (!isUser && currentCharacterAvatarUrl)
+            ? `<img src="${currentCharacterAvatarUrl}" class="msg-avatar-thumb" onclick="app.openImageLightbox()" title="Kliknij aby powiększyć" alt="avatar">`
+            : '';
         return `
             <div class="message ${isUser ? 'user' : 'ai'}" data-msg-id="${msg.id}">
                 <div class="message-wrapper">
+                    ${avatarHtml}
                     <div>
                         <div class="message-content">${parseMessageMarkup(msg.content)}</div>
                         <div class="message-time">${time}</div>
@@ -391,7 +432,7 @@ function renderMemoryPanel() {
 
     const renderSection = (key, label) => {
         const items  = currentMemory[key] || [];
-        const sorted = [...items].sort((a, b) => (b.count || 1) - (a.count || 1));
+        const sorted = [...items].sort((a, b) => (a.firstSeen || 0) - (b.firstSeen || 0));
         return `
             <div class="memory-section">
                 <div class="memory-section-title">${label}</div>
@@ -399,8 +440,12 @@ function renderMemoryPanel() {
                     ? `<ul class="memory-list">${sorted.map(i => {
                         const text  = escapeHtml(i.text || i);
                         const count = i.count || 1;
-                        const badge = count > 1 ? `<span class="mem-count" title="mentioned ${count} times">x${count}</span>` : '';
-                        return `<li>${text}${badge}</li>`;
+                        const badge = count > 1 ? `<span class="mem-count" title="wspomniano ${count} razy">x${count}</span>` : '';
+                        const dateStr = i.firstSeen
+                            ? new Date(i.firstSeen).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                            : '';
+                        const dateBadge = dateStr ? `<span class="mem-date" title="Pierwsze pojawienie: ${dateStr}">${dateStr}</span>` : '';
+                        return `<li>${text}${badge}${dateBadge}</li>`;
                       }).join('')}</ul>`
                     : `<p class="memory-empty-section">Nothing recorded yet</p>`}
             </div>`;
@@ -562,6 +607,9 @@ async function openCharacterEditor(charId) {
         'char-dialogue': '',
     };
 
+    // Reset pending avatar state when opening editor
+    _pendingAvatarBlob = null;
+
     if (charId) {
         const char = await getCharacterById(charId);
         if (char) {
@@ -578,6 +626,13 @@ async function openCharacterEditor(charId) {
         const el = document.getElementById(id);
         if (el) el.value = val;
     }
+
+    // Show existing avatar preview
+    const existingBlob = charId ? await getCharacterAvatar(charId) : null;
+    _showAvatarEditorPreview(existingBlob ? URL.createObjectURL(existingBlob) : null);
+    // reset file input
+    const fi = document.getElementById('char-avatar-input');
+    if (fi) fi.value = '';
 
     openModal('character-modal');
 }
@@ -605,6 +660,15 @@ async function saveCharacter() {
 
     closeModal('character-modal');
     showToast(`Character "${char.name}" saved`, 'success');
+
+    // Persist avatar
+    if (_pendingAvatarBlob === false) {
+        await deleteCharacterAvatar(char.id);
+    } else if (_pendingAvatarBlob instanceof Blob) {
+        await saveCharacterAvatar(char.id, _pendingAvatarBlob);
+    }
+    _pendingAvatarBlob = null;
+
     await selectCharacter(char.id);
 
     // Seed/refresh memory from character definition for all chats (new + edited)
@@ -634,6 +698,7 @@ async function deleteCurrentCharacter() {
         await deleteChatById(c.id);
     }
     await deleteCharacterById(editingCharId);
+    await deleteCharacterAvatar(editingCharId);
     closeModal('character-modal');
     showToast('Character deleted', 'success');
 
@@ -835,6 +900,27 @@ window.app = {
 
     exportCurrentChat:        handleExportChat,
     importChat:               handleImportChat,
+
+    previewCharacterAvatar(input) {
+        const file = input?.files?.[0];
+        if (!file) return;
+        _pendingAvatarBlob = file;
+        _showAvatarEditorPreview(URL.createObjectURL(file));
+    },
+    removeCharacterAvatar() {
+        _pendingAvatarBlob = false;
+        _showAvatarEditorPreview(null);
+    },
+    openImageLightbox() {
+        if (!currentCharacterAvatarUrl) return;
+        const lb  = document.getElementById('image-lightbox');
+        const img = document.getElementById('lightbox-img');
+        if (lb && img) { img.src = currentCharacterAvatarUrl; lb.style.display = 'flex'; }
+    },
+    closeLightbox() {
+        const lb = document.getElementById('image-lightbox');
+        if (lb) lb.style.display = 'none';
+    },
 
     retryLastMessage: () => {
         if (lastFailedMessage) { hideRetryBar(); appSendMessage(lastFailedMessage); }

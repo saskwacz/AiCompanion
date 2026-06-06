@@ -224,6 +224,37 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
 .message:hover .message-delete-btn { opacity: 1; }
 .message-delete-btn:hover { background: var(--error-color); color: white; }
 
+/* AI message avatar thumbnail */
+.msg-avatar-thumb {
+    width: 36px; height: 36px; border-radius: 50%; object-fit: cover;
+    flex-shrink: 0; cursor: pointer; border: 2px solid var(--border-color);
+    transition: border-color 0.2s, transform 0.15s;
+    align-self: flex-end;
+}
+.msg-avatar-thumb:hover { border-color: var(--primary-color); transform: scale(1.08); }
+
+/* Lightbox */
+.lightbox-overlay {
+    position: fixed; inset: 0; z-index: 9000;
+    background: rgba(0,0,0,0.88);
+    display: flex; align-items: center; justify-content: center;
+    cursor: zoom-out;
+}
+.lightbox-img {
+    max-width: 92vw; max-height: 90vh;
+    border-radius: 8px; object-fit: contain;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+    cursor: default;
+}
+.lightbox-close {
+    position: absolute; top: 18px; right: 22px;
+    background: rgba(255,255,255,0.12); border: none; color: #fff;
+    font-size: 20px; width: 38px; height: 38px; border-radius: 50%;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s;
+}
+.lightbox-close:hover { background: rgba(255,255,255,0.28); }
+
 /* Typing indicator */
 .typing-indicator { display: flex; gap: 4px; padding: 4px 0; }
 .typing-dot {
@@ -332,6 +363,18 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
     vertical-align: middle;
     opacity: 0.85;
 }
+.mem-date {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 1px 5px;
+    background: var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 10px;
+    font-size: 10px;
+    vertical-align: middle;
+    opacity: 0.75;
+    cursor: default;
+}
 
 /* ============ TOAST ============ */
 #toast-container {
@@ -388,6 +431,19 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
 .character-editor-body { overflow-y: auto; }
 .char-editor-grid { display: flex; flex-direction: column; gap: 0; }
 .char-textarea { min-height: 80px; resize: vertical !important; }
+
+/* Avatar picker in character editor */
+.char-avatar-group {}
+.char-avatar-picker { display: flex; gap: 16px; align-items: center; }
+.char-avatar-preview {
+    width: 96px; height: 96px; border-radius: 50%;
+    background: var(--background-light); border: 2px solid var(--border-color);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; overflow: hidden;
+}
+.char-avatar-preview-img { width: 100%; height: 100%; object-fit: cover; }
+.char-avatar-placeholder { font-size: 11px; color: var(--text-secondary); text-align: center; padding: 4px; }
+.char-avatar-actions { display: flex; flex-direction: column; gap: 8px; }
 
 /* -- Wide modal (summary) -- */
 .wide-modal { max-width: 680px !important; width: 90vw !important; }

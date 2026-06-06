@@ -1,8 +1,8 @@
 // ============ IndexedDB WRAPPER ============
-// Stores: characters | chats | messages | memory | settings | summaries
+// Stores: characters | chats | messages | memory | settings | summaries | avatars
 
 const DB_NAME = 'aicomp_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let _db = null;
 
@@ -38,6 +38,11 @@ export function openDB() {
             // v2 migration: rolling summaries per chat
             if (oldVersion < 2 && !db.objectStoreNames.contains('summaries')) {
                 db.createObjectStore('summaries', { keyPath: 'chatId' });
+            }
+
+            // v3 migration: character avatar blobs
+            if (!db.objectStoreNames.contains('avatars')) {
+                db.createObjectStore('avatars', { keyPath: 'characterId' });
             }
         };
 
