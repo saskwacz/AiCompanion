@@ -51,7 +51,7 @@ function norm(s) {
 function mergeItems(existingItems, newStrings, exchangeText = '') {
     if (!newStrings.length) return existingItems; // preserve when LLM has no updates for this field
     const exNorm = norm(exchangeText);
-    const now    = createdAt;
+    const now    = Date.now();
     return newStrings.map(text => {
         const keywords = norm(text).split(/\s+/).filter(w => w.length > 3);
         const match    = existingItems.find(item => {
