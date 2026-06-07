@@ -50,5 +50,11 @@ export function buildSystemPrompt(character, memCtx = '') {
     if (memCtx) prompt += `${memCtx}\n\n`;
     if (character.scenario)         prompt += `Scenario: ${character.scenario}\n\n`;
     if (character.dialogueExamples) prompt += `Dialogue Examples:\n${character.dialogueExamples}`;
+    
+    // Add instruction about firstSeen for better timeline understanding
+    if (memCtx && memCtx.includes('[since:')) {
+        prompt += '\n\n[INSTRUCTION] Memory facts with [since: {miliseconds since 1970-01-01}] timestamps help you understand the chronological order of events and how relationships/knowledge developed over time. Use this information to provide contextually accurate responses that reflect what was known when.';
+    }
+    
     return prompt.trim();
 }

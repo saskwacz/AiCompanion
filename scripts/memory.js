@@ -51,7 +51,7 @@ function norm(s) {
 function mergeItems(existingItems, newStrings, exchangeText = '') {
     if (!newStrings.length) return existingItems; // preserve when LLM has no updates for this field
     const exNorm = norm(exchangeText);
-    const now    = Date.now();
+    const now    = createdAt;
     return newStrings.map(text => {
         const keywords = norm(text).split(/\s+/).filter(w => w.length > 3);
         const match    = existingItems.find(item => {
@@ -73,7 +73,8 @@ export function memoryToContext(mem) {
             .map(i => {
                 const t = i.text || i;
                 const c = i.count || 1;
-                return c > 1 ? `${t} [x${c}]` : t;
+                const fs = i.firstSeen ? ` [since: ${i.firstSeen}]` : '';
+                return c > 1 ? `${t} [x${c}]${fs}` : `${t}${fs}`;
             })
             .join(' | ');
 
@@ -97,7 +98,12 @@ export function memoryToContext(mem) {
     if (mem.memories?.length)      userParts.push(`Memories: ${fmt(mem.memories)}`);
     if (userParts.length) parts.push(`[ABOUT THE USER]\n${userParts.join('\n')}`);
 
-    return parts.length ? `[COMPANION MEMORY]\n${parts.join('\n\n')}` : '';
+    const ctx = parts.length ? `[COMPANION MEMORY]\n${parts.join('\n\n')}` : '';
+    
+    // Add note about firstSeen for better chronological understanding
+    const note = parts.length ? '\n\n[NOTE] Memory items may include timestamps like [since: {miliseconds since 1970-01-01}] to help you understand when facts were first learned. Use this to build accurate timeline of events and relationships.' : '';
+    
+    return ctx + note;
 }
 
 // ============ INTERNAL API CALL ============
@@ -278,10 +284,13 @@ Zadanie:
 Zasady:
 - Każda lista maksymalnie 15 elementów — jeśli więcej, usuń najmniej istotne.
 - Każdy element to jedno krótkie, jasne zdanie po polsku.
+- CHRONOLOGIA: Każdy fakt/preferencja/cel może mieć własność "firstSeen" (format: Milisekundy od 1970-01-01}). 
+  Jeśli wprowadzasz NOWY wpis z pierwszą wymiany — oznaż go aktualną datą.
+  Jeśli aktualizujesz istniejący wpis — ZACHOWAJ jego oryginalny "firstSeen" aby zachować chronologię.
 - WAŻNE: Zwróć TYLKO jeden prawidłowy obiekt JSON z dokładnie tymi 10 kluczami:
   facts, preferences, goals, relationships, memories,
   charFacts, charPreferences, charGoals, charPersonality, charMemories
-- Każda wartość to tablica zwykłych ciągów znaków.`;
+- Każda wartość to tablica zwykłych ciągów znaków (lub opcjonalnie obiektów z "text" i "firstSeen").`;
 }
 
 // ============ UPDATE MEMORY AFTER EXCHANGE ============
