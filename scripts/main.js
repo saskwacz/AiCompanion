@@ -58,6 +58,57 @@ function setPendingRequest(delta) {
     if (sendBtn) { sendBtn.disabled = locked; }
 }
 
+// ============ SCROLL BUTTONS ============
+let isNearTop = true;
+let isNearBottom = true;
+
+function updateScrollButtonVisibility() {
+    const container = document.getElementById('messages-container');
+    if (!container) return;
+    
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    const threshold = 100;
+    
+    // Check if near top
+    isNearTop = scrollTop < threshold;
+    const topBtn = document.getElementById('scroll-to-top');
+    if (topBtn) {
+        if (isNearTop) {
+            topBtn.classList.remove('visible');
+        } else {
+            topBtn.classList.add('visible');
+        }
+    }
+    
+    // Check if near bottom
+    const distFromBottom = scrollHeight - (scrollTop + clientHeight);
+    isNearBottom = distFromBottom < threshold;
+    const bottomBtn = document.getElementById('scroll-to-bottom');
+    if (bottomBtn) {
+        if (isNearBottom) {
+            bottomBtn.classList.remove('visible');
+        } else {
+            bottomBtn.classList.add('visible');
+        }
+    }
+}
+
+function scrollToMessagesTop() {
+    const container = document.getElementById('messages-container');
+    if (container) {
+        container.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+
+function scrollToMessagesBottom() {
+    const container = document.getElementById('messages-container');
+    if (container) {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
+}
+
 // ============ INIT ============
 async function init() {
     try {
@@ -94,6 +145,12 @@ function setupEventListeners() {
         const el = document.getElementById('temperature-value');
         if (el) el.textContent = e.target.value;
     });
+    
+    // Scroll buttons listener
+    const messagesContainer = document.getElementById('messages-container');
+    if (messagesContainer) {
+        messagesContainer.addEventListener('scroll', updateScrollButtonVisibility);
+    }
 }
 
 // ============ CHARACTER MANAGEMENT ============
@@ -193,6 +250,7 @@ async function selectChat(chatId) {
     if (titleEl) titleEl.textContent = currentChat.title || 'Chat';
 
     renderMessages();
+    updateScrollButtonVisibility();
     if (memoryPanelOpen) renderMemoryPanel();
 
     document.querySelectorAll('.chat-item-wrapper').forEach(el => {
@@ -403,6 +461,7 @@ function renderMessages() {
     }).join('');
 
     container.scrollTop = container.scrollHeight;
+    updateScrollButtonVisibility();
 }
 
 function showTypingIndicator() {
@@ -416,6 +475,7 @@ function showTypingIndicator() {
         </div></div></div>`;
     c.appendChild(d);
     c.scrollTop = c.scrollHeight;
+    updateScrollButtonVisibility();
 }
 
 function hideTypingIndicator() {
@@ -1034,6 +1094,14 @@ window.app = {
     closeLightbox() {
         const lb = document.getElementById('image-lightbox');
         if (lb) lb.style.display = 'none';
+    },
+
+    scrollToTop() {
+        scrollToMessagesTop();
+    },
+    
+    scrollToBottom() {
+        scrollToMessagesBottom();
     },
 
     setChatFontSize(size) {
