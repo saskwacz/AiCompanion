@@ -2,9 +2,30 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0, user-scalable=yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AiComp">
+    <meta name="theme-color" content="#0f172a">
     <title>AiComp - AI Companion Chat</title>
     <link rel="stylesheet" href="styles.css">
+    <style>
+        body { 
+            -webkit-user-select: text; 
+            -webkit-touch-callout: default;
+            overscroll-behavior: none;
+        }
+        input, textarea, select { 
+            font-size: 16px;
+        }
+        .messages-container {
+            -webkit-user-select: text;
+            user-select: text;
+        }
+        .input-area {
+            touch-action: manipulation;
+        }
+    </style>
 </head>
 <body>
 
@@ -21,12 +42,12 @@
 
         <!-- Character selector -->
         <div class="character-selector">
-            <div class="current-character" onclick="app.showCharacterList()" title="Switch character">
+            <div class="current-character" onclick="app.showCharacterList()" role="button" tabindex="0" aria-label="Switch character" title="Switch character">
                 <span class="char-avatar" id="current-char-avatar">?</span>
                 <span class="char-name"   id="current-char-name">No Character</span>
                 <span class="char-arrow">&#9662;</span>
             </div>
-            <button class="icon-btn" onclick="app.openCharacterEditor(null)" title="Create new character">&#65291;</button>
+            <button class="icon-btn" onclick="app.openCharacterEditor(null)" aria-label="Create new character" title="Create new character">&#65291;</button>
         </div>
 
         <button class="new-chat-btn" onclick="app.createNewChat()">&#65291; New Chat</button>
