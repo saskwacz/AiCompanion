@@ -71,6 +71,9 @@ function updateScrollButtonVisibility() {
     const clientHeight = container.clientHeight;
     const threshold = 100;
     
+    // Debug log for mobile testing
+    console.log('Scroll update:', { scrollTop, scrollHeight, clientHeight, threshold });
+    
     // Check if near top
     isNearTop = scrollTop < threshold;
     const topBtn = document.getElementById('scroll-to-top');
@@ -97,16 +100,52 @@ function updateScrollButtonVisibility() {
 
 function scrollToMessagesTop() {
     const container = document.getElementById('messages-container');
-    if (container) {
-        container.scrollTo({ top: 0, behavior: 'smooth' });
+    if (!container) {
+        console.warn('[Scroll] messages-container not found');
+        return;
     }
+    const rect = container.getBoundingClientRect();
+    const compStyle = window.getComputedStyle(container);
+    console.log('[Scroll] TOP - Container details:', {
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
+        offsetHeight: container.offsetHeight,
+        scrollTop: container.scrollTop,
+        overflowY: compStyle.overflowY,
+        height: compStyle.height,
+        rectHeight: rect.height
+    });
+    
+    container.scrollTop = 0;
+    setTimeout(() => {
+        console.log('[Scroll] TOP - After scrollTop=0:', { scrollTop: container.scrollTop });
+    }, 50);
 }
 
 function scrollToMessagesBottom() {
     const container = document.getElementById('messages-container');
-    if (container) {
-        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    if (!container) {
+        console.warn('[Scroll] messages-container not found');
+        return;
     }
+    const rect = container.getBoundingClientRect();
+    const compStyle = window.getComputedStyle(container);
+    const targetScroll = Math.max(container.scrollHeight - container.clientHeight, 0);
+    console.log('[Scroll] BOTTOM - Container details:', {
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
+        offsetHeight: container.offsetHeight,
+        scrollTop: container.scrollTop,
+        targetScroll: targetScroll,
+        overflowY: compStyle.overflowY,
+        height: compStyle.height,
+        rectHeight: rect.height
+    });
+    
+    container.scrollTop = targetScroll;
+    setTimeout(() => {
+        console.log('[Scroll] BOTTOM - After scrollTop set:', { scrollTop: container.scrollTop, targetScroll });
+    }, 50);
 }
 
 // ============ INIT ============
@@ -146,10 +185,37 @@ function setupEventListeners() {
         if (el) el.textContent = e.target.value;
     });
     
-    // Scroll buttons listener
+    // Scroll buttons listener and initialization
     const messagesContainer = document.getElementById('messages-container');
     if (messagesContainer) {
         messagesContainer.addEventListener('scroll', updateScrollButtonVisibility);
+        // Ensure buttons are visible on init
+        updateScrollButtonVisibility();
+        // Also ensure buttons container has pointer-events
+        const scrollBtnContainer = document.querySelector('.scroll-buttons');
+        if (scrollBtnContainer) {
+            scrollBtnContainer.style.pointerEvents = 'auto';
+        }
+    }
+    
+    // Add click listeners for scroll buttons (for better mobile support)
+    const topBtn = document.getElementById('scroll-to-top');
+    const bottomBtn = document.getElementById('scroll-to-bottom');
+    if (topBtn) {
+        topBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[Scroll] Top button clicked');
+            scrollToMessagesTop();
+        });
+    }
+    if (bottomBtn) {
+        bottomBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[Scroll] Bottom button clicked');
+            scrollToMessagesBottom();
+        });
     }
 }
 
