@@ -72,7 +72,7 @@ function updateScrollButtonVisibility() {
     const threshold = 100;
     
     // Debug log for mobile testing
-    console.log('Scroll update:', { scrollTop, scrollHeight, clientHeight, threshold });
+    //console.log('Scroll update:', { scrollTop, scrollHeight, clientHeight, threshold });
     
     // Check if near top
     isNearTop = scrollTop < threshold;
