@@ -1,7 +1,7 @@
 import { getChatById, createChat, updateChat }              from './chats.js';
 import { getCharacterById, createCharacter, saveCharacterAvatar, getCharacterAvatar } from './characters.js';
 import { getMessagesForChat, addMessage }                  from './messages.js';
-import { getMemoryForChat, saveMemory }                    from './memory.js';
+import { getMemoryForChat, saveMemory, memoryForExport, memoryFromImport } from './memory.js';
 import { getSummaryForChat, saveSummaryForChat }           from './summary.js';
 
 // ============ HELPERS ============
@@ -43,23 +43,12 @@ export async function exportChat(chatId) {
     const avatarBase64 = await blobToBase64(avatarBlob);
 
     const data = {
-        version:    2,
+        version:    3,
         exportedAt: new Date().toISOString(),
         character:  { ...character, id: undefined, avatarBase64 },
         chat:       { ...chat,      id: undefined, characterId: undefined },
         messages:   messages.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp })),
-        memory:     {
-            facts:           memory.facts,
-            preferences:     memory.preferences,
-            goals:           memory.goals,
-            relationships:   memory.relationships,
-            memories:        memory.memories,
-            charFacts:       memory.charFacts       || [],
-            charPreferences: memory.charPreferences || [],
-            charGoals:       memory.charGoals       || [],
-            charPersonality: memory.charPersonality || [],
-            charMemories:    memory.charMemories    || [],
-        },
+        memory:     memoryForExport(memory),
         summary: summary
             ? { text: summary.text, upToMessageCount: summary.upToMessageCount, createdAt: summary.createdAt }
             : null,
@@ -124,21 +113,9 @@ export function importChatFromFile(file) {
                     await addMessage(chat.id, m.role, m.content);
                 }
 
-                // Re-import memory
+                // Re-import memory (v3 schema; v2 legacy keys migrated automatically)
                 if (data.memory) {
-                    await saveMemory({
-                        chatId:          chat.id,
-                        facts:           data.memory.facts           || [],
-                        preferences:     data.memory.preferences     || [],
-                        goals:           data.memory.goals           || [],
-                        relationships:   data.memory.relationships   || [],
-                        memories:        data.memory.memories        || [],
-                        charFacts:       data.memory.charFacts       || [],
-                        charPreferences: data.memory.charPreferences || [],
-                        charGoals:       data.memory.charGoals       || [],
-                        charPersonality: data.memory.charPersonality || [],
-                        charMemories:    data.memory.charMemories    || [],
-                    });
+                    await saveMemory(memoryFromImport(data.memory, chat.id));
                 }
 
                 // Re-import rolling summary (v2+)

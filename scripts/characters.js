@@ -40,21 +40,3 @@ export async function deleteCharacterAvatar(characterId) {
     await dbDelete('avatars', characterId);
 }
 
-/** Assembles the system prompt including optional memory context.
- *  Memory (structured character + user knowledge) is placed FIRST.
- *  Raw 'prompt' and 'characterDetails' fields are NOT repeated here —
- *  their content is already distilled into structured memory. */
-export function buildSystemPrompt(character, memCtx = '') {
-    let prompt = '';
-    // Memory first — highest priority position
-    if (memCtx) prompt += `${memCtx}\n\n`;
-    if (character.scenario)         prompt += `Scenario: ${character.scenario}\n\n`;
-    if (character.dialogueExamples) prompt += `Dialogue Examples:\n${character.dialogueExamples}`;
-    
-    // Add instruction about firstSeen for better timeline understanding
-    if (memCtx && memCtx.includes('[since:')) {
-        prompt += '\n\n[INSTRUCTION] Memory facts with [since: {miliseconds since 1970-01-01}] timestamps help you understand the chronological order of events and how relationships/knowledge developed over time. Use this information to provide contextually accurate responses that reflect what was known when.';
-    }
-    
-    return prompt.trim();
-}

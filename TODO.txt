@@ -1,0 +1,26 @@
+To do
+1. Nowe linie w wiadomościach - obecnie wiadomości są jedną kulą tekstu.
+
+2. Stworzyć strukturalną pamięć dla czatu opaprtą o indexed db i korzystać z niej podczas budowania zapytania do llm. Pamięc aktualizowana po każdym prompcie, kazdej odpowiedzi.
+
+3. Możliwość tworzenia wielu postaci i  dla każdej postaci wiele czatów + osobny ekran z wiekszymi okienkami na tekst.
+
+4. przerobić localstorage na indexeddb
+
+5. chaty zamiast "new chat" powinnyu wyswietlać zajawkę ostatniej wiadomości, liczbę wiadomosci oraz datę ostatniegj wiadomości
+
+6. Ostatnia wiadomośc usera ma zostać zapamiętana nawet jak bład llm + przycisk ponów wysyłkę by wygenerować odpoweidz która nie jest niewłasciwa dla uzytkownika.
+
+7. możliwośc wprowadzenia kilku kluczy api żeby korzystac na zmianę z różnych kont.
+
+8. Opis postaci ma być po zapisnie importowany do pamięci strukturalnej.
+
+9. Export/import całościowy czatu (historia czatu, structured memory dla czatu)
+
+10. Podgląd statstyk companiona na czacie (jego profil, preferencje, cele, fkaty, relacje z uzytkownikiem, wspomnienia)
+
+11. Technicznie - jasvascript w folderze skrypt - wiecej małych plików js jako moduły.
+
+
+
+

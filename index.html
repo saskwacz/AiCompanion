@@ -192,30 +192,6 @@
                 </label>
             </div>
 
-            <!-- ═══ DOSTAWCY ═══ -->
-            <div class="settings-section-header">&#128257; Dostawcy API</div>
-            <div class="setting-group">
-                <label for="provider-chat">Czat (odpowiedzi)</label>
-                <select id="provider-chat" class="setting-input">
-                    <option value="gemini">Gemini</option>
-                    <option value="groq">Groq</option>
-                </select>
-            </div>
-            <div class="setting-group">
-                <label for="provider-memory">Pamięć (ekstrakcja)</label>
-                <select id="provider-memory" class="setting-input">
-                    <option value="gemini">Gemini</option>
-                    <option value="groq">Groq</option>
-                </select>
-            </div>
-            <div class="setting-group">
-                <label for="provider-summary">Podsumowanie</label>
-                <select id="provider-summary" class="setting-input">
-                    <option value="gemini">Gemini</option>
-                    <option value="groq">Groq</option>
-                </select>
-            </div>
-
             <!-- ═══ GEMINI ═══ -->
             <div class="settings-section-header">&#128171; Gemini</div>
             <div class="setting-group">
@@ -265,58 +241,6 @@
                     <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=16384">16K</button>
                     <button class="quick-btn" onclick="document.getElementById('summary-tokens').value=32768">32K</button>
                 </div>
-            </div>
-
-            <!-- ═══ GROQ ═══ -->
-            <div class="settings-section-header">&#9889; Groq</div>
-            <div class="setting-group">
-                <label>Klucze API (Groq)</label>
-                <div id="groq-keys-list" class="api-keys-list"></div>
-                <div class="api-key-form">
-                    <input type="text"     id="new-groq-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
-                    <input type="password" id="new-groq-value" class="setting-input" placeholder="Wklej klucz Groq...">
-                    <button class="btn-secondary" onclick="app.addGroqKeyRow()">Dodaj</button>
-                </div>
-                <small>Klucze rotują losowo. Nigdy nie wysyłane poza Groq.</small>
-            </div>
-            <div class="setting-group">
-                <label for="groq-chat-model">Model — czat</label>
-                <select id="groq-chat-model" class="setting-input">
-                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-                    <option value="llama3-8b-8192">llama3-8b-8192</option>
-                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
-                    <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
-                    <option value="gemma2-9b-it">gemma2-9b-it</option>
-                    <option value="meta-llama/llama-4-scout-17b-16e-instruct">meta-llama/llama-4-scout-17b-16e-instruct</option>
-                    <option value="groq/compound">groq/compound</option>
-                    <option value="groq/compound-mini">gemma2-9b-it</option>
-                </select>
-            </div>
-            <div class="setting-group">
-                <label for="groq-memory-model">Model — pamięć</label>
-                <select id="groq-memory-model" class="setting-input">
-                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-                    <option value="llama3-8b-8192">llama3-8b-8192</option>
-                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
-                    <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
-                    <option value="gemma2-9b-it">gemma2-9b-it</option>
-                    <option value="meta-llama/llama-4-scout-17b-16e-instruct">meta-llama/llama-4-scout-17b-16e-instruct</option>
-                    <option value="groq/compound">groq/compound</option>
-                    <option value="groq/compound-mini">gemma2-9b-it</option>
-                </select>
-            </div>
-            <div class="setting-group">
-                <label for="groq-summary-model">Model — podsumowanie</label>
-                <select id="groq-summary-model" class="setting-input">
-                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-                    <option value="llama3-8b-8192">llama3-8b-8192</option>
-                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
-                    <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
-                    <option value="gemma2-9b-it">gemma2-9b-it</option>
-                    <option value="meta-llama/llama-4-scout-17b-16e-instruct">meta-llama/llama-4-scout-17b-16e-instruct</option>
-                    <option value="groq/compound">groq/compound</option>
-                    <option value="groq/compound-mini">gemma2-9b-it</option>
-                </select>
             </div>
         </div>
         <div class="modal-footer">

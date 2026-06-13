@@ -1,16 +1,16 @@
 import { openDB }                                                      from './db.js';
-import { loadSettings, persistSettings, getShuffledApiKeys, getShuffledGroqApiKeys } from './settings.js';
+import { loadSettings, persistSettings, getShuffledApiKeys } from './settings.js';
 import { createCharacter, updateCharacter, deleteCharacterById,
-         getCharacterById, getAllCharacters, buildSystemPrompt,
+         getCharacterById, getAllCharacters,
          saveCharacterAvatar, getCharacterAvatar, deleteCharacterAvatar } from './characters.js';
+import { buildSystemPrompt } from './providers/gemini-prompts.js';
 import { createChat, updateChat, deleteChatById,
          getChatById, getChatsForCharacter }                           from './chats.js';
 import { addMessage, getMessagesForChat, deleteMessageById,
          deleteMessagesFrom, deleteAllForChat }                        from './messages.js';
 import { getMemoryForChat, saveMemory, updateMemoryFromExchange,
-         seedMemoryFromCharacter, memoryToContext }                    from './memory.js';
-import { callGeminiAPI, callGeminiForSummary }                         from './api.js';
-import { callGroqAPI }                                                  from './groq.js';
+         seedMemoryFromCharacter, memoryToContext, pruneMemoryByMsgIds } from './memory.js';
+import { callGeminiAPI } from './providers/gemini.js';
 import { getSummaryForChat, deleteSummaryForChat,
          shouldAutoSummarize, generateAndSaveSummary }                 from './summary.js';
 import { exportChat, importChatFromFile }                              from './export.js';
@@ -18,17 +18,8 @@ import { escapeHtml, parseMessageMarkup, showToast, formatTimestamp }  from './u
 
 // ============ STATE ============
 // ============ PROVIDER HELPERS ============
-function getProviderConfig(providerKey) {
-    const provider = settings[providerKey] || 'gemini';
-    if (provider === 'groq') {
-        const keys = getShuffledGroqApiKeys(settings);
-        let model = 'llama-3.3-70b-versatile';
-        if (providerKey === 'chatProvider')    model = settings.groqChatModel    || model;
-        if (providerKey === 'memoryProvider')  model = settings.groqMemoryModel  || model;
-        if (providerKey === 'summaryProvider') model = settings.groqSummaryModel || model;
-        return { provider: 'groq', keys, model };
-    }
-    return { provider: 'gemini', keys: getShuffledApiKeys(settings) };
+function getProviderConfig() {
+    return { provider: 'gemini', keys: getShuffledApiKeys(settings), model: null };
 }
 let settings             = {};
 let currentCharacter     = null;
@@ -295,7 +286,7 @@ async function createNewChat() {
     const apiKeys = memCfgSeed.keys;
     if (apiKeys.length) {
         setTimeout(async () => {
-            const seeded = await seedMemoryFromCharacter(chat.id, currentCharacter, apiKeys, null, settings.memoryTokens ?? 8192, memCfgSeed.provider === 'groq' ? memCfgSeed : null);
+            const seeded = await seedMemoryFromCharacter(chat.id, currentCharacter, apiKeys, null, settings.memoryTokens ?? 8192, memCfgSeed);
             if (seeded && currentChat?.id === chat.id) {
                 currentMemory = seeded;
                 renderMemoryPanel();
@@ -374,25 +365,16 @@ async function appSendMessage(retryText) {
     showTypingIndicator();
 
     try {
-        const memCtx       = memoryToContext(currentMemory);
+        const memCtx       = await memoryToContext(currentMemory, { query: message, apiKey: apiKeys });
         const systemPrompt  = buildSystemPrompt(currentCharacter, memCtx);
 
-        const response = chatCfg.provider === 'groq'
-            ? await callGroqAPI({
-                apiKey: apiKeys, messages: currentMessages, systemPrompt,
-                chatSummary:   currentChatSummary,
-                temperature:   settings.temperature,
-                maxTokens:     settings.maxTokens,
-                contextTokens: settings.contextTokens,
-                model:         chatCfg.model,
-              })
-            : await callGeminiAPI({
-                apiKey: apiKeys, messages: currentMessages, systemPrompt,
-                chatSummary:   currentChatSummary,
-                temperature:   settings.temperature,
-                maxTokens:     settings.maxTokens,
-                contextTokens: settings.contextTokens,
-              });
+        const response = await callGeminiAPI({
+            apiKey: apiKeys, messages: currentMessages, systemPrompt,
+            chatSummary:   currentChatSummary,
+            temperature:   settings.temperature,
+            maxTokens:     settings.maxTokens,
+            contextTokens: settings.contextTokens,
+        });
 
         const aiMsg = await addMessage(currentChat.id, 'assistant', response);
         currentMessages = [...currentMessages, aiMsg];
@@ -413,7 +395,7 @@ async function appSendMessage(retryText) {
         aiResponseCount++;
         console.log(`[Memory] AI response #${aiResponseCount} — update in ${MEMORY_UPDATE_EVERY - ((aiResponseCount - 1) % MEMORY_UPDATE_EVERY)} more`);
         if (aiResponseCount % MEMORY_UPDATE_EVERY === 0) {
-            setTimeout(() => triggerMemoryUpdate(message, response), 500);
+            setTimeout(() => triggerMemoryUpdate(message, response, aiMsg.seqId), 500);
         }
 
         // Auto-summary every AI_RESPONSES_PER_SUMMARY AI replies (non-blocking)
@@ -435,14 +417,14 @@ async function appSendMessage(retryText) {
     }
 }
 
-async function triggerMemoryUpdate(userMsg, aiMsg) {
+async function triggerMemoryUpdate(userMsg, aiMsg, aiMsgSeqId = null) {
     const memCfg = getProviderConfig('memoryProvider');
     setPendingRequest(+1);
     try {
         currentMemory = await updateMemoryFromExchange(
             currentChat.id, userMsg, aiMsg, memCfg.keys,
             currentCharacter, currentMessages, settings.memoryTokens ?? 8192,
-            memCfg.provider === 'groq' ? memCfg : null
+            memCfg, aiMsgSeqId
         );
         renderMemoryPanel();
     } catch (e) {
@@ -466,7 +448,7 @@ async function triggerAutoSummary() {
         const newSummary = await generateAndSaveSummary(
             chatId, messages, char, existing, sumCfg.keys,
             settings.summaryTokens ?? 8192,
-            sumCfg.provider === 'groq' ? sumCfg : null
+            sumCfg
         );
         if (currentChat?.id === chatId) {
             currentChatSummary = newSummary;
@@ -508,6 +490,7 @@ function renderMessages() {
     container.innerHTML = currentMessages.map(msg => {
         const isUser = msg.role === 'user';
         const time   = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const seqLabel = msg.seqId != null ? `<span class="msg-seq-id" title="Message #${msg.seqId}">#${msg.seqId}</span> ` : '';
         const avatarHtml = (!isUser && currentCharacterAvatarUrl)
             ? `<img src="${currentCharacterAvatarUrl}" class="msg-avatar-thumb" onclick="app.openImageLightbox()" title="Kliknij aby powiększyć" alt="avatar">`
             : '';
@@ -517,7 +500,7 @@ function renderMessages() {
                     ${avatarHtml}
                     <div>
                         <div class="message-content">${parseMessageMarkup(msg.content)}</div>
-                        <div class="message-time">${time}</div>
+                        <div class="message-time">${seqLabel}${time}</div>
                     </div>
                     <button class="message-delete-btn"
                             onclick="app.deleteMessageFrom(${msg.id})"
@@ -610,25 +593,24 @@ function renderMemoryPanel() {
                             ? new Date(i.firstSeen).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' })
                             : '';
                         const dateBadge = dateStr ? `<span class="mem-date" title="Pierwsze pojawienie: ${dateStr}">${dateStr}</span>` : '';
-                        return `<li>${text}${badge}${dateBadge}</li>`;
+                        const msgBadge  = i.createdAtMsgId != null
+                            ? `<span class="mem-msgid" title="Powstało przy wiadomości #${i.createdAtMsgId}">msg#${i.createdAtMsgId}</span>`
+                            : '';
+                        return `<li>${text}${badge}${dateBadge}${msgBadge}</li>`;
                       }).join('')}</ul>`
                     : `<p class="memory-empty-section">Nothing recorded yet</p>`}
             </div>`;
     };
 
     const charSections = [
-        ['charFacts',       '🧬 Self-facts'],
-        ['charPreferences', '💙 Own preferences'],
-        ['charGoals',       '🎯 Own goals'],
-        ['charPersonality', '✨ Personality traits'],
-        ['charMemories',    '📖 Own memories'],
+        ['charProfile',  '🧬 Self-profile'],
+        ['charGoals',    '🎯 Own goals'],
+        ['charMemories', '📖 Own memories'],
     ];
     const userSections = [
-        ['facts',         '📋 User facts'],
-        ['preferences',   '❤️ User preferences'],
-        ['goals',         '🏆 User goals'],
-        ['relationships', '🤝 Relationship'],
-        ['memories',      '💭 Shared memories'],
+        ['profile',  '📋 User profile'],
+        ['goals',    '🏆 User goals'],
+        ['memories', '💭 Shared memories'],
     ];
 
     body.innerHTML =
@@ -655,7 +637,7 @@ async function refreshMemory() {
         currentMemory = await updateMemoryFromExchange(
             currentChat.id, lastUser.content, lastAi.content, apiKeys,
             currentCharacter, currentMessages, settings.memoryTokens ?? 8192,
-            memCfg.provider === 'groq' ? memCfg : null
+            memCfg
         );
         renderMemoryPanel();
         showToast('Memory updated', 'success');
@@ -665,8 +647,14 @@ async function refreshMemory() {
 // ============ DELETE MESSAGE ============
 async function deleteMessageFrom(msgId) {
     if (!confirm('Delete this message and all messages after it?')) return;
-    const remaining = await deleteMessagesFrom(currentChat.id, msgId);
+    const { remaining, deletedSeqIds } = await deleteMessagesFrom(currentChat.id, msgId);
     currentMessages = remaining;
+
+    // Remove memory items that were created during the deleted messages
+    if (deletedSeqIds.length) {
+        currentMemory = await pruneMemoryByMsgIds(currentChat.id, deletedSeqIds) ?? currentMemory;
+        if (memoryPanelOpen) renderMemoryPanel();
+    }
 
     const last = remaining.at(-1);
     await updateChat(currentChat.id, {
@@ -704,22 +692,7 @@ async function openSettings() {
     const curFs = settings.chatFontSize ?? 14;
     if (fs) fs.value = curFs;
     if (fsVal) fsVal.textContent = curFs;
-    // Provider selectors
-    const pc = document.getElementById('provider-chat');
-    const pm = document.getElementById('provider-memory');
-    const ps = document.getElementById('provider-summary');
-    if (pc) pc.value = settings.chatProvider    || 'gemini';
-    if (pm) pm.value = settings.memoryProvider  || 'gemini';
-    if (ps) ps.value = settings.summaryProvider || 'gemini';
-    // Groq models
-    const gcm = document.getElementById('groq-chat-model');
-    const gmm = document.getElementById('groq-memory-model');
-    const gsm = document.getElementById('groq-summary-model');
-    if (gcm) gcm.value = settings.groqChatModel    || 'llama-3.3-70b-versatile';
-    if (gmm) gmm.value = settings.groqMemoryModel  || 'llama-3.3-70b-versatile';
-    if (gsm) gsm.value = settings.groqSummaryModel || 'llama-3.3-70b-versatile';
     renderApiKeysList();
-    renderGroqKeysList();
     openModal('settings-modal');
 }
 
@@ -735,20 +708,6 @@ function renderApiKeysList() {
                 <button class="btn-danger small" onclick="app.removeApiKey(${i})">Remove</button>
             </div>`).join('')
         : '<p class="no-keys">No API keys added yet</p>';
-}
-
-function renderGroqKeysList() {
-    const list = document.getElementById('groq-keys-list');
-    if (!list) return;
-    const keys = settings.groqApiKeys || [];
-    list.innerHTML = keys.length
-        ? keys.map((k, i) => `
-            <div class="api-key-item">
-                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
-                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
-                <button class="btn-danger small" onclick="app.removeGroqKey(${i})">Remove</button>
-            </div>`).join('')
-        : '<p class="no-keys">Brak kluczy Groq</p>';
 }
 
 function addApiKeyRow() {
@@ -767,24 +726,6 @@ function removeApiKey(idx) {
     if (!confirm('Remove this API key?')) return;
     settings.apiKeys = settings.apiKeys.filter((_, i) => i !== idx);
     renderApiKeysList();
-}
-
-function addGroqKeyRow() {
-    const labelEl = document.getElementById('new-groq-label');
-    const keyEl   = document.getElementById('new-groq-value');
-    const key     = keyEl?.value.trim();
-    if (!key) { showToast('Groq key cannot be empty', 'error'); return; }
-    settings.groqApiKeys = [...(settings.groqApiKeys || []),
-        { label: labelEl?.value.trim() || `Groq Key ${(settings.groqApiKeys?.length || 0) + 1}`, key }];
-    if (labelEl) labelEl.value = '';
-    if (keyEl)   keyEl.value   = '';
-    renderGroqKeysList();
-}
-
-function removeGroqKey(idx) {
-    if (!confirm('Remove this Groq key?')) return;
-    settings.groqApiKeys = settings.groqApiKeys.filter((_, i) => i !== idx);
-    renderGroqKeysList();
 }
 
 async function handleSaveSettings() {
@@ -806,20 +747,6 @@ async function handleSaveSettings() {
     const fs = document.getElementById('chat-font-size');
     if (fs) settings.chatFontSize = parseInt(fs.value);
     applyChatFontSize(settings.chatFontSize ?? 14);
-    // Provider selectors
-    const pc = document.getElementById('provider-chat');
-    const pm = document.getElementById('provider-memory');
-    const ps = document.getElementById('provider-summary');
-    if (pc) settings.chatProvider    = pc.value;
-    if (pm) settings.memoryProvider  = pm.value;
-    if (ps) settings.summaryProvider = ps.value;
-    // Groq models
-    const gcm = document.getElementById('groq-chat-model');
-    const gmm = document.getElementById('groq-memory-model');
-    const gsm = document.getElementById('groq-summary-model');
-    if (gcm) settings.groqChatModel    = gcm.value;
-    if (gmm) settings.groqMemoryModel  = gmm.value;
-    if (gsm) settings.groqSummaryModel = gsm.value;
     await persistSettings(settings);
     closeModal('settings-modal');
     showToast('Settings saved', 'success');
@@ -913,7 +840,7 @@ async function saveCharacter() {
         const chats = await getChatsForCharacter(char.id);
         for (const c of chats) {
             setTimeout(async () => {
-                const seeded = await seedMemoryFromCharacter(c.id, char, apiKeys, null, settings.memoryTokens ?? 8192, memCfgChar.provider === 'groq' ? memCfgChar : null);
+                const seeded = await seedMemoryFromCharacter(c.id, char, apiKeys, null, settings.memoryTokens ?? 8192, memCfgChar);
                 if (seeded && currentChat?.id === c.id) {
                     currentMemory = seeded;
                     renderMemoryPanel();
@@ -1014,7 +941,7 @@ async function generateSummary() {
         const record = await generateAndSaveSummary(
             currentChat.id, currentMessages, currentCharacter, currentChatSummary, apiKeys,
             settings.summaryTokens ?? 8192,
-            sumCfg.provider === 'groq' ? sumCfg : null
+            sumCfg
         );
         currentChatSummary = record;
         currentSummary     = record?.text || '';
@@ -1117,8 +1044,6 @@ window.app = {
     saveSettings:             handleSaveSettings,
     addApiKeyRow,
     removeApiKey,
-    addGroqKeyRow,
-    removeGroqKey,
 
     openCharacterEditor,
     closeCharacterEditor:     () => closeModal('character-modal'),

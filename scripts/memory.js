@@ -1,346 +1,427 @@
 import { dbGet, dbPut } from './db.js';
-import { callGroqForMemory } from './groq.js';
+import { callGeminiForMemory, embedContents, embedText } from './providers/gemini.js';
+import { buildMemorySeedPrompt, buildMemoryUpdatePrompt } from './providers/gemini-prompts.js';
 
-const MEMORY_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
+export const MEMORY_SCHEMA_VERSION = 3;
 
-// ============ EMPTY TEMPLATE ============
-// Each item shape: { text: string, count: number }
-// Memory has two namespaces:
-//   user.*      - what the companion knows about the USER
-//   character.* - what the companion knows about ITSELF (evolves during chat)
+/** @readonly */
+export const MEMORY_KEYS = [
+    'profile', 'goals', 'memories',
+    'charProfile', 'charGoals', 'charMemories',
+];
+
+export const MEMORY_TOP_K        = 20;
+export const MEMORY_MIN_SCORE    = 0.28;
+export const MEMORY_FALLBACK_PER = 8;
+export const EMBEDDING_DIM       = 768;
+const EMBED_BATCH_SIZE           = 32;
+
+const SECTION_LABELS = {
+    charProfile:  'Self-profile',
+    charGoals:    'Own goals',
+    charMemories: 'Own memories',
+    profile:      'Profile',
+    goals:        'Goals',
+    memories:     'Memories',
+};
+
+// ============ ITEM SHAPE ============
+// { id, text, count, firstSeen, embedding: number[] | null }
+
+export function createMemoryItem(text, existing = null, createdAtMsgId = null) {
+    const now = Date.now();
+    const sameText = existing && norm(existing.text || existing) === norm(text);
+    return {
+        id:             existing?.id ?? crypto.randomUUID(),
+        text,
+        count:          existing?.count ?? 1,
+        firstSeen:      existing?.firstSeen ?? now,
+        createdAtMsgId: existing?.createdAtMsgId ?? createdAtMsgId,
+        embedding:      sameText ? (existing?.embedding ?? null) : null,
+    };
+}
+
+function normalizeItem(item) {
+    if (!item) return null;
+    const text = typeof item === 'string' ? item : item.text;
+    if (!text) return null;
+    return createMemoryItem(text, typeof item === 'object' ? item : null);
+}
+
+function normalizeItems(items) {
+    return (items || []).map(normalizeItem).filter(Boolean);
+}
+
+function mergeLegacyItems(...arrays) {
+    const seen = new Set();
+    const result = [];
+    for (const arr of arrays) {
+        for (const item of arr || []) {
+            const normalized = normalizeItem(item);
+            if (!normalized) continue;
+            const key = norm(normalized.text);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            result.push(normalized);
+        }
+    }
+    return result;
+}
+
+function isLegacyMemory(mem) {
+    return mem.facts !== undefined || mem.preferences !== undefined
+        || mem.charFacts !== undefined || mem.charPreferences !== undefined
+        || mem.charPersonality !== undefined || mem.relationships !== undefined;
+}
+
+/** Migrates legacy memory to current schema. */
+export function normalizeMemory(mem) {
+    if (!mem) return emptyMemory();
+
+    const migrated = isLegacyMemory(mem) ? {
+        chatId:       mem.chatId,
+        schemaVersion: MEMORY_SCHEMA_VERSION,
+        profile:      mergeLegacyItems(mem.facts, mem.preferences, mem.relationships),
+        goals:        mem.goals        || [],
+        memories:     mem.memories     || [],
+        charProfile:  mergeLegacyItems(mem.charFacts, mem.charPreferences, mem.charPersonality),
+        charGoals:    mem.charGoals    || [],
+        charMemories: mem.charMemories || [],
+        updatedAt:    mem.updatedAt ?? Date.now(),
+    } : { ...mem };
+
+    for (const key of MEMORY_KEYS) {
+        migrated[key] = normalizeItems(migrated[key]);
+    }
+    migrated.schemaVersion = MEMORY_SCHEMA_VERSION;
+    migrated.updatedAt     = mem.updatedAt ?? Date.now();
+    return migrated;
+}
+
 export function emptyMemory(chatId) {
     return {
         chatId,
-        // --- USER knowledge ---
-        facts:         [],
-        preferences:   [],
-        goals:         [],
-        relationships: [],
-        memories:      [],
-        // --- CHARACTER self-knowledge ---
-        charFacts:         [],
-        charPreferences:   [],
-        charGoals:         [],
-        charPersonality:   [],
-        charMemories:      [],
-        updatedAt:     Date.now(),
+        schemaVersion: MEMORY_SCHEMA_VERSION,
+        profile:      [],
+        goals:        [],
+        memories:     [],
+        charProfile:  [],
+        charGoals:    [],
+        charMemories: [],
+        updatedAt:    Date.now(),
     };
 }
 
 // ============ CRUD ============
 export async function getMemoryForChat(chatId) {
-    return (await dbGet('memory', chatId)) || emptyMemory(chatId);
+    const raw = await dbGet('memory', chatId);
+    return raw ? normalizeMemory(raw) : emptyMemory(chatId);
 }
 
 export async function saveMemory(mem) {
-    await dbPut('memory', { ...mem, updatedAt: Date.now() });
+    await dbPut('memory', normalizeMemory({ ...mem, updatedAt: Date.now() }));
 }
 
-// ============ HELPERS ============
+/**
+ * Remove all memory items whose createdAtMsgId is in the deletedSeqIds set.
+ * Persists the pruned memory and returns it.
+ */
+export async function pruneMemoryByMsgIds(chatId, deletedSeqIds) {
+    if (!deletedSeqIds?.length) return null;
+    const idSet = new Set(deletedSeqIds);
+    const mem   = await getMemoryForChat(chatId);
+    let changed = false;
+    const pruned = { ...mem };
+    for (const key of MEMORY_KEYS) {
+        const before = pruned[key] || [];
+        const after  = before.filter(item => {
+            if (item.createdAtMsgId != null && idSet.has(item.createdAtMsgId)) {
+                changed = true;
+                return false;
+            }
+            return true;
+        });
+        pruned[key] = after;
+    }
+    if (changed) {
+        await saveMemory(pruned);
+        console.log(`[Memory] Pruned items tied to msgIds: [${[...idSet].join(', ')}]`);
+    }
+    return pruned;
+}
+
+// ============ EXPORT / IMPORT ============
+export function memoryForExport(mem) {
+    const m = normalizeMemory(mem);
+    const out = { schemaVersion: MEMORY_SCHEMA_VERSION };
+    for (const key of MEMORY_KEYS) {
+        out[key] = (m[key] || []).map(({ id, text, count, firstSeen, createdAtMsgId, embedding }) => ({
+            id, text, count, firstSeen, createdAtMsgId: createdAtMsgId ?? null, embedding: embedding ?? null,
+        }));
+    }
+    return out;
+}
+
+export function memoryFromImport(data, chatId) {
+    if (!data) return emptyMemory(chatId);
+    return normalizeMemory({ chatId, ...data });
+}
+
+// ============ EMBEDDINGS ============
+
+export function flattenMemoryItems(mem) {
+    const m = normalizeMemory(mem);
+    return MEMORY_KEYS.flatMap(key =>
+        (m[key] || []).map(item => ({ ...item, section: key })),
+    );
+}
+
+export function itemsNeedingEmbedding(mem) {
+    return flattenMemoryItems(mem).filter(i => !i.embedding?.length);
+}
+
+export function cosineSimilarity(a, b) {
+    if (!a?.length || a.length !== b?.length) return 0;
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        na  += a[i] * a[i];
+        nb  += b[i] * b[i];
+    }
+    const denom = Math.sqrt(na) * Math.sqrt(nb);
+    return denom ? dot / denom : 0;
+}
+
+function applyEmbeddings(mem, items, vectors) {
+    const byId = new Map(items.map((item, i) => [item.id, vectors[i]]));
+    const updated = { ...mem };
+    for (const key of MEMORY_KEYS) {
+        updated[key] = (mem[key] || []).map(item =>
+            byId.has(item.id) ? { ...item, embedding: byId.get(item.id) } : item,
+        );
+    }
+    return updated;
+}
+
+/** Embed all items missing vectors; returns updated memory (does not persist). */
+export async function ensureEmbeddings(mem, apiKey) {
+    const m       = normalizeMemory(mem);
+    const needing = itemsNeedingEmbedding(m);
+    if (!needing.length || !apiKey) return m;
+
+    const vectors = [];
+    for (let i = 0; i < needing.length; i += EMBED_BATCH_SIZE) {
+        const batch = needing.slice(i, i + EMBED_BATCH_SIZE);
+        const batchVecs = await embedContents({
+            apiKey,
+            texts:                batch.map(item => item.text),
+            outputDimensionality: EMBEDDING_DIM,
+        });
+        vectors.push(...batchVecs);
+    }
+
+    console.log(`[Memory] Embedded ${needing.length} item(s)`);
+    return applyEmbeddings(m, needing, vectors);
+}
+
+// ============ SEMANTIC SEARCH ============
+
+export function searchMemoryItems(mem, queryEmbedding, { topK = MEMORY_TOP_K, minScore = MEMORY_MIN_SCORE } = {}) {
+    return flattenMemoryItems(mem)
+        .filter(i => i.embedding?.length)
+        .map(item => ({ ...item, score: cosineSimilarity(queryEmbedding, item.embedding) }))
+        .filter(i => i.score >= minScore)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topK);
+}
+
+function fallbackItems(mem, perSection = MEMORY_FALLBACK_PER) {
+    const m = normalizeMemory(mem);
+    return MEMORY_KEYS.flatMap(key =>
+        [...(m[key] || [])]
+            .sort((a, b) => (b.count || 1) - (a.count || 1))
+            .slice(0, perSection)
+            .map(item => ({ ...item, section: key, score: 0 })),
+    );
+}
+
+function formatMemoryContext(items) {
+    if (!items.length) return '';
+
+    const bySection = {};
+    for (const item of items) {
+        if (!bySection[item.section]) bySection[item.section] = [];
+        bySection[item.section].push(item);
+    }
+
+    const fmtSection = (sectionKey, sectionItems) => {
+        const label = SECTION_LABELS[sectionKey] || sectionKey;
+        const lines = sectionItems
+            .sort((a, b) => (b.score || 0) - (a.score || 0) || (b.count || 1) - (a.count || 1))
+            .map(i => {
+                const c  = i.count || 1;
+                const fs = i.firstSeen ? ` [since: ${i.firstSeen}]` : '';
+                const sc = i.score > 0 ? ` [rel: ${i.score.toFixed(2)}]` : '';
+                const text = c > 1 ? `${i.text} [x${c}]${fs}${sc}` : `${i.text}${fs}${sc}`;
+                return text;
+            })
+            .join(' | ');
+        return `${label}: ${lines}`;
+    };
+
+    const charKeys = ['charProfile', 'charGoals', 'charMemories'];
+    const userKeys = ['profile', 'goals', 'memories'];
+
+    const charParts = charKeys.filter(k => bySection[k]?.length).map(k => fmtSection(k, bySection[k]));
+    const userParts = userKeys.filter(k => bySection[k]?.length).map(k => fmtSection(k, bySection[k]));
+
+    const parts = [];
+    if (charParts.length) parts.push(`[ABOUT YOURSELF]\n${charParts.join('\n')}`);
+    if (userParts.length) parts.push(`[ABOUT THE USER]\n${userParts.join('\n')}`);
+
+    const ctx  = `[COMPANION MEMORY — semantic retrieval]\n${parts.join('\n\n')}`;
+    const note = '\n\n[NOTE] Memory items are ranked by relevance to the current message. Timestamps [since: …] mark when a fact was first learned.';
+    return ctx + note;
+}
+
+/**
+ * Builds memory context for the system prompt using semantic search.
+ * @param {object} mem
+ * @param {{ query?: string, apiKey?: string|object[], topK?: number, minScore?: number }} opts
+ */
+export async function memoryToContext(mem, { query = '', apiKey, topK = MEMORY_TOP_K, minScore = MEMORY_MIN_SCORE } = {}) {
+    let m = normalizeMemory(mem);
+    if (!flattenMemoryItems(m).length) return '';
+
+    if (apiKey) {
+        m = await ensureEmbeddings(m, apiKey);
+    }
+
+    const embedded = flattenMemoryItems(m).filter(i => i.embedding?.length);
+    let selected;
+
+    if (query && apiKey && embedded.length) {
+        try {
+            const queryEmb = await embedText({ apiKey, text: query, outputDimensionality: EMBEDDING_DIM });
+            selected = searchMemoryItems(m, queryEmb, { topK, minScore });
+            if (window.DEBUG_PROMPTS) {
+                console.groupCollapsed('[Memory] Semantic retrieval');
+                console.log('Query:', query.substring(0, 120));
+                console.log('Hits:', selected.map(i => `${i.score.toFixed(3)} ${i.section}: ${i.text.substring(0, 60)}`));
+                console.groupEnd();
+            }
+        } catch (e) {
+            console.warn('[Memory] Semantic search failed, using fallback:', e.message);
+            selected = fallbackItems(m);
+        }
+    } else {
+        selected = fallbackItems(m);
+    }
+
+    if (!selected.length) selected = fallbackItems(m);
+    return formatMemoryContext(selected);
+}
+
+// ============ MERGE / PARSE ============
 function norm(s) {
     return String(s).toLowerCase().replace(/[^\w\s]/g, '').trim();
 }
 
-/**
- * Merge new plain-string list into existing {text,count} items.
- * - If newStrings is empty the existing list is returned unchanged (LLM had nothing to add).
- * - Matching existing items carry their count over and get +1 if the topic appears in exchangeText.
- * - Brand-new items start at count 1.
- * - Items missing from newStrings are dropped (LLM pruned them) — only when LLM sent a non-empty list.
- */
-function mergeItems(existingItems, newStrings, exchangeText = '') {
-    if (!newStrings.length) return existingItems; // preserve when LLM has no updates for this field
-    const exNorm = norm(exchangeText);
-    const now    = Date.now();
+function mergeItems(existingItems, newStrings, exchangeText = '', aiMsgSeqId = null) {
+    if (!newStrings.length) return normalizeItems(existingItems);
+    const exNorm     = norm(exchangeText);
+    const now        = Date.now();
+    const existing   = normalizeItems(existingItems);
+
     return newStrings.map(text => {
-        const keywords = norm(text).split(/\s+/).filter(w => w.length > 3);
-        const match    = existingItems.find(item => {
-            const eNorm = norm(item.text || item);
+        const keywords    = norm(text).split(/\s+/).filter(w => w.length > 3);
+        const match       = existing.find(item => {
+            const eNorm = norm(item.text);
             return keywords.some(w => eNorm.includes(w));
         });
-        const base      = match ? (match.count || 1) : 0;
-        const mentioned = keywords.some(w => exNorm.includes(w));
-        const firstSeen = match?.firstSeen ?? now; // preserve original timestamp
-        return { text, count: base + (mentioned ? 1 : 1), firstSeen };
+        const base        = match ? (match.count || 1) : 0;
+        const mentioned   = keywords.some(w => exNorm.includes(w));
+        const textChanged = match && norm(match.text) !== norm(text);
+        return {
+            id:             match?.id ?? crypto.randomUUID(),
+            text,
+            count:          base + (mentioned ? 1 : 1),
+            firstSeen:      match?.firstSeen ?? now,
+            // preserve existing msgId if updating; stamp new msgId for new items
+            createdAtMsgId: match ? (match.createdAtMsgId ?? aiMsgSeqId) : aiMsgSeqId,
+            embedding:      (match && !textChanged) ? (match.embedding ?? null) : null,
+        };
     });
 }
 
-// ============ CONTEXT STRING FOR SYSTEM PROMPT ============
-export function memoryToContext(mem) {
-    const fmt = items =>
-        [...items]
-            .sort((a, b) => (b.count || 1) - (a.count || 1))
-            .map(i => {
-                const t = i.text || i;
-                const c = i.count || 1;
-                const fs = i.firstSeen ? ` [since: ${i.firstSeen}]` : '';
-                return c > 1 ? `${t} [x${c}]${fs}` : `${t}${fs}`;
-            })
-            .join(' | ');
+function toStr(arr) {
+    return (Array.isArray(arr) ? arr : [])
+        .map(i => (typeof i === 'string' ? i : i?.text))
+        .filter(Boolean);
+}
 
-    const parts = [];
+function parseMemoryResponse(raw) {
+    const u = raw.user ?? {};
+    const c = raw.character ?? {};
 
-    // Character self-knowledge (shown first — highest priority)
-    const charParts = [];
-    if (mem.charFacts?.length)       charParts.push(`Self-facts: ${fmt(mem.charFacts)}`);
-    if (mem.charPreferences?.length) charParts.push(`Own preferences: ${fmt(mem.charPreferences)}`);
-    if (mem.charGoals?.length)       charParts.push(`Own goals: ${fmt(mem.charGoals)}`);
-    if (mem.charPersonality?.length) charParts.push(`Personality traits revealed: ${fmt(mem.charPersonality)}`);
-    if (mem.charMemories?.length)    charParts.push(`Own memories/experiences: ${fmt(mem.charMemories)}`);
-    if (charParts.length) parts.push(`[ABOUT YOURSELF]\n${charParts.join('\n')}`);
+    const profile     = toStr(raw.profile ?? u.profile);
+    const charProfile = toStr(raw.charProfile ?? c.charProfile);
 
-    // User knowledge
-    const userParts = [];
-    if (mem.facts?.length)         userParts.push(`Facts: ${fmt(mem.facts)}`);
-    if (mem.preferences?.length)   userParts.push(`Preferences: ${fmt(mem.preferences)}`);
-    if (mem.goals?.length)         userParts.push(`Goals: ${fmt(mem.goals)}`);
-    if (mem.relationships?.length) userParts.push(`Relationship w/ User: ${fmt(mem.relationships)}`);
-    if (mem.memories?.length)      userParts.push(`Memories: ${fmt(mem.memories)}`);
-    if (userParts.length) parts.push(`[ABOUT THE USER]\n${userParts.join('\n')}`);
-
-    const ctx = parts.length ? `[COMPANION MEMORY]\n${parts.join('\n\n')}` : '';
-    
-    // Add note about firstSeen for better chronological understanding
-    const note = parts.length ? '\n\n[NOTE] Memory items may include timestamps like [since: {miliseconds since 1970-01-01}] to help you understand when facts were first learned. Use this to build accurate timeline of events and relationships.' : '';
-    
-    return ctx + note;
+    return {
+        profile:     profile.length     ? profile     : toStr(raw.facts ?? u.facts)
+            .concat(toStr(raw.preferences ?? u.preferences), toStr(raw.relationships ?? u.relationships)),
+        goals:       toStr(raw.goals       ?? u.goals),
+        memories:    toStr(raw.memories    ?? u.memories),
+        charProfile: charProfile.length   ? charProfile : toStr(raw.charFacts ?? c.charFacts)
+            .concat(toStr(raw.charPreferences ?? c.charPreferences), toStr(raw.charPersonality ?? c.charPersonality)),
+        charGoals:   toStr(raw.charGoals   ?? c.charGoals),
+        charMemories: toStr(raw.charMemories ?? c.charMemories),
+    };
 }
 
 // ============ INTERNAL API CALL ============
-// providerConfig: null = Gemini (default), or { provider:'groq', keys, model }
-async function callMemoryModel(prompt, apiKey, maxOutputTokens = 4096, providerConfig = null) {
-    if (providerConfig?.provider === 'groq') {
-        return callGroqForMemory({
-            prompt,
-            apiKey:          providerConfig.keys,
-            maxOutputTokens,
-            model:           providerConfig.model,
-        });
-    }
-    const items = Array.isArray(apiKey) ? apiKey : [apiKey];
-    let lastErr;
-    for (const item of items) {
-        const key   = typeof item === 'string' ? item : item.key;
-        const label = typeof item === 'string' ? `…${key.slice(-6)}` : (item.label || `…${key.slice(-6)}`);
-        console.log(`[API] Memory extraction → key: "${label}"`);
-        if (window.DEBUG_PROMPTS) {
-            console.groupCollapsed('[Prompt] Memory extraction');
-            console.log(prompt);
-            console.groupEnd();
-        }
-        try {
-            const r = await fetch(`${MEMORY_MODEL_URL}?key=${key}`, {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents:         [{ role: 'user', parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        temperature:      0.1,
-                        maxOutputTokens,
-                        responseMimeType: 'application/json',
-                        thinkingConfig:   { thinkingBudget: 0 }, // disable thinking — pure JSON extraction
-                    },
-                }),
-            });
-            if (!r.ok) {
-                const err = await r.json().catch(() => ({}));
-                throw new Error(`Memory model error ${r.status}: ${err.error?.message || ''}`);
-            }
-            const d          = await r.json();
-            if (d.promptFeedback?.blockReason) {
-                throw new Error(`Memory prompt blocked: ${d.promptFeedback.blockReason}`);
-            }
-            const candidate  = d.candidates?.[0];
-            const text       = candidate?.content?.parts?.[0]?.text;
-            if (!text) throw new Error('Empty memory model response');
-
-            // Log a warning if the response was cut off by token limit
-            if (candidate.finishReason === 'MAX_TOKENS') {
-                console.warn('[Memory] Response hit MAX_TOKENS — JSON may be truncated. Attempting repair.');
-            }
-
-            // responseMimeType forces clean JSON — strip any accidental fences just in case
-            const stripped = text.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '');
-            const match    = stripped.match(/\{[\s\S]*\}/);
-            if (!match) {
-                console.warn('[Memory] No JSON in response, using empty result. Raw:', text.substring(0, 200));
-                return {};
-            }
-            try {
-                return JSON.parse(match[0]);
-            } catch {
-                // Truncated JSON repair:
-                // 1. Remove any trailing incomplete string (open quote without close)
-                // 2. Remove trailing comma
-                // 3. Close open arrays and objects
-                let s = match[0];
-                // Remove incomplete last string value: ,"incomplete or ,"incomplete
-                s = s.replace(/,?\s*"[^"]*$/, '');
-                // Remove trailing comma
-                s = s.replace(/,\s*$/, '');
-                // Count unclosed brackets
-                const opens = (s.match(/\[/g) || []).length - (s.match(/\]/g) || []).length;
-                const objs  = (s.match(/\{/g) || []).length - (s.match(/\}/g) || []).length;
-                for (let i = 0; i < opens; i++) s += ']';
-                for (let i = 0; i < objs;  i++) s += '}';
-                try {
-                    return JSON.parse(s);
-                } catch {
-                    console.warn('[Memory] JSON repair failed, using empty result.');
-                    return {};
-                }
-            }
-        } catch (e) {
-            lastErr = e;
-            console.warn(`[Memory] "${label}" failed:`, e.message);
-            if (items.indexOf(item) < items.length - 1) {
-                console.log('[Memory] Waiting 5 s before trying next key…');
-                await new Promise(r => setTimeout(r, 5000));
-            }
-        }
-    }
-    throw lastErr;
+async function callMemoryModel(prompt, apiKey, maxOutputTokens = 4096, providerConfig = null, priority = 'normal') {
+    return callGeminiForMemory({
+        prompt,
+        apiKey:          providerConfig?.keys ?? apiKey,
+        maxOutputTokens,
+        priority:        providerConfig?.priority ?? priority,
+    });
 }
 
-// ============ BUILD UPDATE PROMPT ============
-function buildUpdatePrompt(existing, character, recentMessages, userMsg, aiMsg) {
-    // Send plain strings only — {text,count} objects inflate the prompt needlessly
-    const fmtPlain = arr => (arr || []).map(i => i.text || i).filter(Boolean);
-    const existingStr = JSON.stringify({
-        user: {
-            facts:         fmtPlain(existing.facts),
-            preferences:   fmtPlain(existing.preferences),
-            goals:         fmtPlain(existing.goals),
-            relationships: fmtPlain(existing.relationships),
-            memories:      fmtPlain(existing.memories),
-        },
-        character: {
-            charFacts:       fmtPlain(existing.charFacts),
-            charPreferences: fmtPlain(existing.charPreferences),
-            charGoals:       fmtPlain(existing.charGoals),
-            charPersonality: fmtPlain(existing.charPersonality),
-            charMemories:    fmtPlain(existing.charMemories),
-        },
-    }, null, 2);
-
-    const companionName = character?.name || 'Companion';
-
-    // Recent context: messages BEFORE the current exchange (exclude last user+AI pair)
-    const allMessages    = recentMessages || [];
-    const isFirstExchange = allMessages.filter(m => m.role === 'user').length <= 1;
-
-    // For first exchange: welcome msg goes INTO the exchange block (not context)
-    // For later exchanges: welcome is just part of history context
-    const contextMsgs = isFirstExchange
-        ? []   // no separate context on first exchange — welcome is part of exchange below
-        : allMessages.slice(-8, -2);
-
-    const recentStr = contextMsgs
-        .map(m => `${m.role === 'user' ? 'Użytkownik' : companionName}: ${m.content}`)
-        .join('\n');
-
-    // Build the exchange section
-    const welcomeMsg = character?.welcomeMessage;
-    const exchangeStr = (isFirstExchange && welcomeMsg)
-        ? `${companionName}: ${welcomeMsg}\nUżytkownik: ${userMsg}\n${companionName}: ${aiMsg}`
-        : `Użytkownik: ${userMsg}\n${companionName}: ${aiMsg}`;
-
-    const charCtx = character ? [
-        `IMIĘ POSTACI: ${character.name}`,
-        character.scenario         ? `SCENARIUSZ: ${character.scenario}`                     : '',
-        character.dialogueExamples ? `PRZYKŁADY DIALOGÓW:\n${character.dialogueExamples}` : '',
-    ].filter(Boolean).join('\n') : '';
-
-    return `Jesteś asystentem ekstrakcji pamięci dla postaci AI o imieniu ${companionName}.
-Odpowiadaj WYŁĄCZNIE po polsku — wszystkie wartości w tablicach muszą być w języku polskim.
-
-${charCtx ? `KONTEKST POSTACI:\n${charCtx}\n` : ''}
-AKTUALNA PAMIĘĆ (zachowaj WSZYSTKIE istniejące wpisy, dodaj nowe):
-${existingStr}
-${recentStr ? `\nOSTATNIE WIADOMOŚCI Z ROZMOWY (kontekst):\n${recentStr}\n` : ''}
-WYMIANA DO PRZEANALIZOWANIA${isFirstExchange ? ' (pierwsze spotkanie — analizuj całość)' : ''}:
-${exchangeStr}
-
-Zadanie:
-1. Weź WSZYSTKIE istniejące wpisy z pamięci powyżej.
-2. Dodaj NOWE fakty/preferencje/cele wynikające z tej wymiany.
-3. Usuń wpis TYLKO jeśli jest bezpośrednio zaprzeczony w tej wymianie.
-4. Zwróć KOMPLETNE, zaktualizowane listy — nie tylko nowe elementy.
-
---- DZIAŁ 1: user (co ${companionName} wie o UŻYTKOWNIKU) ---
-- "facts"         = PEŁNA lista faktów o użytkowniku (imię, wiek, praca, miejscowość itp.)
-- "preferences"   = PEŁNA lista upodobań, niechęci, hobby, zainteresowań użytkownika
-- "goals"         = PEŁNA lista celów, planów, życzeń użytkownika
-- "relationships" = PEŁNA lista informacji o relacjach użytkownika
-- "memories"      = PEŁNA lista ważnych momentów i wydarzeń
-
---- DZIAŁ 2: character (co ${companionName} wie o SOBIE) ---
-- "charFacts"       = PEŁNA lista faktów o sobie
-- "charPreferences" = PEŁNA lista własnych preferencji
-- "charGoals"       = PEŁNA lista własnych celów i motywacji
-- "charPersonality" = PEŁNA lista cech osobowości
-- "charMemories"    = PEŁNA lista własnych wspomnień
-
-Zasady:
-- Każda lista maksymalnie 15 elementów — jeśli więcej, usuń najmniej istotne.
-- Każdy element to jedno krótkie, jasne zdanie po polsku.
-- CHRONOLOGIA: Każdy fakt/preferencja/cel może mieć własność "firstSeen" (format: Milisekundy od 1970-01-01}). 
-  Jeśli wprowadzasz NOWY wpis z pierwszą wymiany — oznaż go aktualną datą.
-  Jeśli aktualizujesz istniejący wpis — ZACHOWAJ jego oryginalny "firstSeen" aby zachować chronologię.
-- WAŻNE: Zwróć TYLKO jeden prawidłowy obiekt JSON z dokładnie tymi 10 kluczami:
-  facts, preferences, goals, relationships, memories,
-  charFacts, charPreferences, charGoals, charPersonality, charMemories
-- Każda wartość to tablica zwykłych ciągów znaków (lub opcjonalnie obiektów z "text" i "firstSeen").`;
+async function persistWithEmbeddings(mem, apiKey) {
+    const withEmb = apiKey ? await ensureEmbeddings(mem, apiKey) : mem;
+    await saveMemory(withEmb);
+    return withEmb;
 }
 
 // ============ UPDATE MEMORY AFTER EXCHANGE ============
-export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, character, recentMessages = [], maxOutputTokens = 8192, providerConfig = null) {
-    const existing     = await getMemoryForChat(chatId);
+export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, character, recentMessages = [], maxOutputTokens = 8192, providerConfig = null, aiMsgSeqId = null) {
+    const existing     = normalizeMemory(await getMemoryForChat(chatId));
     const exchangeText = userMsg + ' ' + aiMsg;
-    const prompt       = buildUpdatePrompt(existing, character, recentMessages, userMsg, aiMsg);
+    const prompt       = buildMemoryUpdatePrompt(existing, character, recentMessages, userMsg, aiMsg);
+    const keys         = providerConfig?.keys ?? apiKey;
 
     try {
-        const raw = await callMemoryModel(prompt, apiKey, maxOutputTokens, providerConfig);
+        const raw  = await callMemoryModel(prompt, apiKey, maxOutputTokens, providerConfig, 'normal');
+        const flat = parseMemoryResponse(raw);
 
-        // Normalize: model may return { user:{facts,..}, character:{charFacts,..} }
-        // OR a flat object { facts, preferences, ..., charFacts, ... }
-        // Also items may be plain strings OR {text,count} objects — extract text.
-        const flat = {
-            facts:           raw.facts           ?? raw.user?.facts           ?? [],
-            preferences:     raw.preferences     ?? raw.user?.preferences     ?? [],
-            goals:           raw.goals           ?? raw.user?.goals           ?? [],
-            relationships:   raw.relationships   ?? raw.user?.relationships   ?? [],
-            memories:        raw.memories        ?? raw.user?.memories        ?? [],
-            charFacts:       raw.charFacts       ?? raw.character?.charFacts       ?? [],
-            charPreferences: raw.charPreferences ?? raw.character?.charPreferences ?? [],
-            charGoals:       raw.charGoals       ?? raw.character?.charGoals       ?? [],
-            charPersonality: raw.charPersonality ?? raw.character?.charPersonality ?? [],
-            charMemories:    raw.charMemories    ?? raw.character?.charMemories    ?? [],
-        };
-        // Extract plain strings (handle both "string" and {text,count} items)
-        const toStr = arr => (Array.isArray(arr) ? arr : []).map(i => (typeof i === 'string' ? i : i?.text)).filter(Boolean);
-
-        console.log('[Memory] Parsed (flat):', JSON.stringify({
-            facts: flat.facts?.length, preferences: flat.preferences?.length,
-            goals: flat.goals?.length, charFacts: flat.charFacts?.length,
+        console.log('[Memory] Parsed:', JSON.stringify({
+            profile: flat.profile?.length, goals: flat.goals?.length,
+            charProfile: flat.charProfile?.length,
         }));
 
-        const mi = (key, ex) => mergeItems(ex || [], toStr(flat[key]), exchangeText);
+        const mi = (key, ex) => mergeItems(ex || [], flat[key], exchangeText, aiMsgSeqId);
         const updated = {
             ...existing,
-            facts:           mi('facts',           existing.facts),
-            preferences:     mi('preferences',     existing.preferences),
-            goals:           mi('goals',           existing.goals),
-            relationships:   mi('relationships',   existing.relationships),
-            memories:        mi('memories',        existing.memories),
-            charFacts:       mi('charFacts',       existing.charFacts),
-            charPreferences: mi('charPreferences', existing.charPreferences),
-            charGoals:       mi('charGoals',       existing.charGoals),
-            charPersonality: mi('charPersonality', existing.charPersonality),
-            charMemories:    mi('charMemories',    existing.charMemories),
+            profile:      mi('profile',      existing.profile),
+            goals:        mi('goals',        existing.goals),
+            memories:     mi('memories',     existing.memories),
+            charProfile:  mi('charProfile',  existing.charProfile),
+            charGoals:    mi('charGoals',    existing.charGoals),
+            charMemories: mi('charMemories', existing.charMemories),
         };
-        await saveMemory(updated);
-        return updated;
+        return await persistWithEmbeddings(updated, keys);
     } catch (e) {
         console.warn('[Memory] Update failed:', e.message);
         return existing;
@@ -348,67 +429,31 @@ export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, c
 }
 
 // ============ SEED / REFRESH FROM CHARACTER DEFINITION ============
-// Runs after save/edit of character to populate its self-knowledge.
 export async function seedMemoryFromCharacter(chatId, character, apiKey, existingMemory, maxOutputTokens = 8192, providerConfig = null) {
     const hasContent = character.characterDetails || character.scenario || character.prompt;
     if (!hasContent) return;
 
-    const existing = existingMemory || await getMemoryForChat(chatId);
-
-    // Seed prompt: ONLY character self-knowledge (5 keys).
-    // User fields stay empty — they're populated during actual conversation.
-    const prompt = `Jesteś asystentem ekstrakcji wiedzy własnej postaci AI.
-Analiza poniższej definicji postaci — wypełnij dokładnie 5 kluczy JSON.
-ODPOWIADAJ WYŁĄCZNIE PO POLSKU — wszystkie wartości w tablicach muszą być w języku polskim.
-
-IMIĘ POSTACI: ${character.name}
-PROMPT OSOBOWOŚCI: ${character.prompt || 'brak'}
-SCENARIUSZ: ${character.scenario || 'brak'}
-SZCZEGÓŁY POSTACI: ${character.characterDetails || 'brak'}
-PRZYKŁADY DIALOGÓW:
-${character.dialogueExamples || 'brak'}
-
-Wyodrębnij TYLKO z powyższej definicji postaci:
-- "charFacts"       : konkretne fakty (wygląd, przeszłość, zdolności, zawód) — maks. 10 krótkich zdań
-- "charPreferences" : upodobania, niechęci, zainteresowania, hobby — maks. 10 krótkich zdań
-- "charGoals"       : motywacje, cele, pragnienia — maks. 10 krótkich zdań
-- "charPersonality" : cechy osobowości, dziwactwa, wzorce zachowania — maks. 10 krótkich zdań
-- "charMemories"    : wydarzenia z przeszłości, formujące doświadczenia — maks. 10 krótkich zdań
-
-Zasady:
-- Każdy element to jedno krótkie zdanie w języku polskim (bez symboli listy).
-- Zwróć TYLKO prawidłowy obiekt JSON z dokładnie tymi 5 kluczami. Żadnego innego tekstu.`;
+    const existing = normalizeMemory(existingMemory || await getMemoryForChat(chatId));
+    const prompt   = buildMemorySeedPrompt(character);
+    const keys     = providerConfig?.keys ?? apiKey;
 
     try {
-        const raw = await callMemoryModel(prompt, apiKey, maxOutputTokens, providerConfig);
-        const et  = [character.prompt, character.scenario,
+        const raw  = await callMemoryModel(prompt, apiKey, maxOutputTokens, providerConfig, 'batch');
+        const flat = parseMemoryResponse(raw);
+        const et   = [character.prompt, character.scenario,
                       character.characterDetails, character.dialogueExamples].filter(Boolean).join(' ');
-        // Normalize nested/flat and plain strings/{text,count} objects
-        const flat  = { charFacts: raw.charFacts ?? raw.character?.charFacts ?? [],
-                         charPreferences: raw.charPreferences ?? raw.character?.charPreferences ?? [],
-                         charGoals: raw.charGoals ?? raw.character?.charGoals ?? [],
-                         charPersonality: raw.charPersonality ?? raw.character?.charPersonality ?? [],
-                         charMemories: raw.charMemories ?? raw.character?.charMemories ?? [] };
-        const toStr = arr => (Array.isArray(arr) ? arr : []).map(i => (typeof i === 'string' ? i : i?.text)).filter(Boolean);
-        const mi    = (key, ex) => mergeItems(ex || [], toStr(flat[key]), et);
+        const mi   = (key, ex) => mergeItems(ex || [], flat[key], et);
 
         const seeded = {
             chatId,
-            // user knowledge: preserve whatever was already there (empty on first seed)
-            facts:           existing.facts         || [],
-            preferences:     existing.preferences   || [],
-            goals:           existing.goals         || [],
-            relationships:   existing.relationships || [],
-            memories:        existing.memories      || [],
-            // character self-knowledge extracted from definition
-            charFacts:       mi('charFacts',       existing.charFacts),
-            charPreferences: mi('charPreferences', existing.charPreferences),
-            charGoals:       mi('charGoals',       existing.charGoals),
-            charPersonality: mi('charPersonality', existing.charPersonality),
-            charMemories:    mi('charMemories',    existing.charMemories),
+            profile:      existing.profile      || [],
+            goals:        existing.goals        || [],
+            memories:     existing.memories     || [],
+            charProfile:  mi('charProfile',  existing.charProfile),
+            charGoals:    mi('charGoals',    existing.charGoals),
+            charMemories: mi('charMemories', existing.charMemories),
         };
-        await saveMemory(seeded);
-        return seeded;
+        return await persistWithEmbeddings(seeded, keys);
     } catch (e) {
         console.warn('[Memory] Seed failed:', e.message);
     }

@@ -2,7 +2,7 @@
 // Stores: characters | chats | messages | memory | settings | summaries | avatars
 
 const DB_NAME = 'aicomp_db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let _db = null;
 
@@ -43,6 +43,11 @@ export function openDB() {
             // v3 migration: character avatar blobs
             if (!db.objectStoreNames.contains('avatars')) {
                 db.createObjectStore('avatars', { keyPath: 'characterId' });
+            }
+
+            // v4 migration: per-chat sequential message counters
+            if (oldVersion < 4 && !db.objectStoreNames.contains('messageSeq')) {
+                db.createObjectStore('messageSeq', { keyPath: 'chatId' });
             }
         };
 

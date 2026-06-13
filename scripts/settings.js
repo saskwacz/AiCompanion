@@ -11,13 +11,7 @@ const DEFAULTS = {
     // Gemini keys
     apiKeys:       [],
     apiKeyIndex:   0,
-    // Groq keys & models
-    groqApiKeys:       [],
-    groqChatModel:     'llama-3.3-70b-versatile',
-    groqMemoryModel:   'llama-3.3-70b-versatile',
-    groqSummaryModel:  'llama-3.3-70b-versatile',
-    // Provider selection
-    chatProvider:    'gemini',   // 'gemini' | 'groq'
+    chatProvider:    'gemini',
     memoryProvider:  'gemini',
     summaryProvider: 'gemini',
     debugPrompts:  false,
@@ -29,6 +23,9 @@ export async function loadSettings() {
         const r = await dbGet('settings', key);
         if (r !== null) result[key] = r.value;
     }
+    if (result.chatProvider === 'groq')    result.chatProvider    = 'gemini';
+    if (result.memoryProvider === 'groq')  result.memoryProvider  = 'gemini';
+    if (result.summaryProvider === 'groq') result.summaryProvider = 'gemini';
     return result;
 }
 
@@ -51,11 +48,3 @@ export function getShuffledApiKeys(s) {
     return keys;
 }
 
-export function getShuffledGroqApiKeys(s) {
-    const keys = (s.groqApiKeys || []).filter(k => k.key).slice();
-    for (let i = keys.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [keys[i], keys[j]] = [keys[j], keys[i]];
-    }
-    return keys;
-}

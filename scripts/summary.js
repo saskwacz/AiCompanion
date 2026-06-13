@@ -1,7 +1,6 @@
 import { dbGet, dbPut, dbDelete } from './db.js';
-import { callGroqForSummary }    from './groq.js';
-
-const SUMMARY_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
+import { callGeminiForSummary } from './providers/gemini.js';
+import { buildSummaryPrompt } from './providers/gemini-prompts.js';
 
 /** How many AI responses between automatic summaries. */
 export const AI_RESPONSES_PER_SUMMARY = 10;
@@ -56,80 +55,17 @@ export async function generateAndSaveSummary(chatId, messages, character, existi
         .map(m => `${m.role === 'user' ? 'User' : charName}: ${m.content}`)
         .join('\n\n');
 
-    const prevSection = existingSummary?.text
-        ? `PREVIOUS SUMMARY (incorporate this):\n${existingSummary.text}\n\n---\n\n`
-        : '';
+    const prompt = buildSummaryPrompt({
+        convText,
+        charName,
+        previousSummaryText: existingSummary?.text,
+    });
 
-    const prompt =
-`${prevSection}Write a comprehensive, detailed summary of the conversation below.
-This summary will REPLACE the full history in future API calls, so include everything important.
-
-Cover:
-- All topics discussed and decisions made
-- Important facts revealed about the user (name, age, job, hobbies, relationships, etc.)
-- Key moments and memorable exchanges
-- Emotional tone and relationship dynamic between user and ${charName}
-- Any running themes, promises, inside jokes, or ongoing topics
-- Anything that might be referenced in future messages
-
-Be thorough and specific — omit nothing significant.
-
-CONVERSATION:
-${convText}`;
-
-    const items = Array.isArray(apiKey) ? apiKey : [apiKey];
-    let text, lastErr;
-
-    // ---- Groq path ----
-    if (providerConfig?.provider === 'groq') {
-        text = await callGroqForSummary({
-            apiKey:          providerConfig.keys,
-            prompt,
-            maxOutputTokens,
-            model:           providerConfig.model,
-        });
-        const record = { chatId, text, upToMessageCount: cutoff, createdAt: Date.now() };
-        await saveSummaryForChat(chatId, text, cutoff);
-        return record;
-    }
-
-    // ---- Gemini path ----
-    for (const item of items) {
-        const key   = typeof item === 'string' ? item : item.key;
-        const label = typeof item === 'string' ? `…${key.slice(-6)}` : (item.label || `…${key.slice(-6)}`);
-        console.log(`[API] Auto-summary → key: "${label}"`);
-        if (window.DEBUG_PROMPTS) {
-            console.groupCollapsed('[Prompt] Auto-summary');
-            console.log(prompt);
-            console.groupEnd();
-        }
-        try {
-            const r = await fetch(`${SUMMARY_MODEL_URL}?key=${key}`, {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({
-                    contents:         [{ role: 'user', parts: [{ text: prompt }] }],
-                    generationConfig: { temperature: 0.3, maxOutputTokens, topP: 0.95 },
-                }),
-            });
-            if (!r.ok) {
-                const err = await r.json().catch(() => ({}));
-                throw new Error(`Summary API error ${r.status}: ${err.error?.message || ''}`);
-            }
-            const data = await r.json();
-            text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!text) throw new Error('Empty summary response');
-            break;
-        } catch (e) {
-            lastErr = e;
-            console.warn(`[Summary] "${label}" failed:`, e.message);
-            if (items.indexOf(item) < items.length - 1) {
-                console.log('[Summary] Waiting 5 s before trying next key…');
-                await new Promise(r => setTimeout(r, 5000));
-            }
-        }
-    }
-    if (!text) throw lastErr;
+    const text = await callGeminiForSummary({
+        apiKey:          providerConfig?.keys ?? apiKey,
+        prompt,
+        maxOutputTokens,
+    });
 
     const record = { chatId, text, upToMessageCount: cutoff, createdAt: Date.now() };
     await saveSummaryForChat(chatId, text, cutoff);

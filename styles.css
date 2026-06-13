@@ -1,4 +1,4 @@
-﻿:root {
+:root {
     --primary-color: #6366f1;
     --primary-dark: #4f46e5;
     --secondary-color: #8b5cf6;
@@ -233,6 +233,16 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
 .message-time { font-size: 10px; color: var(--text-secondary); margin-top: 4px; padding: 0 2px; }
 .message.user .message-time { text-align: right; }
 
+.msg-seq-id {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--border-color);
+    opacity: 0.7;
+    letter-spacing: 0.3px;
+    user-select: none;
+}
+
 /* Markup spans */
 .msg-italic { color: var(--text-secondary); font-style: italic; }
 .msg-bold   { color: var(--text-primary); font-weight: bold; }
@@ -397,6 +407,20 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
     vertical-align: middle;
     opacity: 0.75;
     cursor: default;
+}
+.mem-msgid {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 5px;
+    background: rgba(99,102,241,0.18);
+    color: var(--primary-color);
+    border-radius: 10px;
+    font-size: 0.68em;
+    font-weight: 700;
+    vertical-align: middle;
+    opacity: 0.8;
+    cursor: default;
+    font-family: monospace;
 }
 
 /* ============ TOAST ============ */
