@@ -15,18 +15,139 @@ import {
     selectChatMessages,
 } from './gemini-prompts.js';
 
+import { GEMINI_MODELS } from './gemini-models.js';
+export { GEMINI_MODELS };
+
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const KEY_RETRY_DELAY_MS = 5000;
 
-/** @readonly */
-export const GEMINI_MODELS = {
-    CHAT_PRIMARY:    'gemini-3.5-flash',
-    CHAT_FALLBACK:   'gemini-3.1-flash-lite',
-    MEMORY_PRIMARY:  'gemini-3-flash-preview',
-    MEMORY_FALLBACK: 'gemini-3.1-flash-lite',
-    SUMMARY:         'gemini-3.1-flash-lite',
-    EMBEDDING:       'gemini-embedding-2',
-};
+// ─── Rate-limit tracking (429) — per (key fingerprint, model) ──────────────
+const RL_KEY = 'aicomp_gemini_rl';
+const RL_TTL = 24 * 60 * 60 * 1000; // 24 h
+
+/** Stable short identifier for a key (last 12 chars). Never exposed in UI. */
+function keyFp(keyValue) { return String(keyValue).slice(-12); }
+/** Composite storage key for a (key, model) pair. */
+function rlStoreKey(keyValue, model) { return `${keyFp(keyValue)}|${model}`; }
+
+function rlLoad() {
+    try { return JSON.parse(localStorage.getItem(RL_KEY) || '{}'); }
+    catch { return {}; }
+}
+function rlSave(map) {
+    try { localStorage.setItem(RL_KEY, JSON.stringify(map)); } catch {}
+}
+
+/** Mark a specific (key, model) pair as rate-limited for 24 h. */
+export function rlMarkBlocked(keyValue, model) {
+    const map = rlLoad();
+    map[rlStoreKey(keyValue, model)] = Date.now() + RL_TTL;
+    rlSave(map);
+    console.warn(`[Gemini] Key "…${keyFp(keyValue)}" + model "${model}" zablokowane na 24 h (429).`);
+}
+
+/** Returns true if this specific (key, model) pair is currently rate-limited. */
+export function rlIsBlockedForKey(keyValue, model) {
+    const map = rlLoad();
+    const sk  = rlStoreKey(keyValue, model);
+    const exp = map[sk];
+    if (!exp) return false;
+    if (Date.now() >= exp) { delete map[sk]; rlSave(map); return false; }
+    return true;
+}
+
+/** Returns all active blocks for a specific key: [{model, until}] */
+export function rlGetStatusForKey(keyValue) {
+    const fp  = keyFp(keyValue);
+    const map = rlLoad();
+    const now = Date.now();
+    const out = [];
+    for (const [sk, exp] of Object.entries(map)) {
+        if (exp <= now) continue;
+        const sep = sk.indexOf('|');
+        if (sep < 0) continue;
+        if (sk.slice(0, sep) === fp) out.push({ model: sk.slice(sep + 1), until: new Date(exp) });
+    }
+    return out;
+}
+
+/** Returns all active blocks across all keys: [{keyFp, model, until}] */
+export function rlGetStatus() {
+    const map = rlLoad();
+    const now = Date.now();
+    const alive = {};
+    let changed = false;
+    for (const [sk, exp] of Object.entries(map)) {
+        if (exp > now) alive[sk] = exp;
+        else changed = true;
+    }
+    if (changed) rlSave(alive);
+    return Object.entries(alive).map(([sk, exp]) => {
+        const sep = sk.indexOf('|');
+        return { keyFp: sk.slice(0, sep), model: sk.slice(sep + 1), until: new Date(exp) };
+    });
+}
+
+/**
+ * Clear rate-limit blocks.
+ * - rlClear()                  → clears everything
+ * - rlClear(keyValue)          → clears all models for this key
+ * - rlClear(keyValue, model)   → clears this specific (key, model) pair
+ */
+export function rlClear(keyValue, model) {
+    const map = rlLoad();
+    if (!keyValue) {
+        for (const k of Object.keys(map)) delete map[k];
+    } else {
+        const fp = keyFp(keyValue);
+        for (const sk of Object.keys(map)) {
+            const sep = sk.indexOf('|');
+            const skFp = sk.slice(0, sep);
+            const skModel = sk.slice(sep + 1);
+            if (skFp === fp && (!model || skModel === model)) delete map[sk];
+        }
+    }
+    rlSave(map);
+}
+
+// ─── Rate-limit error classes ────────────────────────────────────────────────
+
+export class RateLimitError extends Error {
+    constructor(model) {
+        super(`Limit API Gemini (429) dla modelu "${model}"`);
+        this.name  = 'RateLimitError';
+        this.model = model;
+    }
+}
+
+export class AllModelsRateLimitedError extends Error {
+    constructor(models) {
+        // Find the earliest unblock time across all active blocks
+        const all    = rlGetStatus();
+        const minExp = all.length
+            ? Math.min(...all.map(s => s.until.getTime()))
+            : Date.now() + RL_TTL;
+        const hrs = Math.ceil((minExp - Date.now()) / 3_600_000);
+        super(
+            `Limit API Gemini wyczerpany (429) — wszystkie klucze zablokowane dla modelu(i).\n` +
+            `Odblokowanie za ~${hrs} h (${new Date(minExp).toLocaleTimeString()}).`
+        );
+        this.name      = 'AllModelsRateLimitedError';
+        this.models    = models;
+        this.unblockAt = new Date(minExp);
+    }
+}
+
+// ─── Helper: single-model call (no model fallback) ──────────────────────────
+/** Wraps withKeyFallback, converts RateLimitError → AllModelsRateLimitedError. */
+async function singleModelCall(model, apiKey, fn) {
+    try {
+        return await withKeyFallback(apiKey, model, fn, model);
+    } catch (e) {
+        if (e instanceof RateLimitError) throw new AllModelsRateLimitedError([model]);
+        throw e;
+    }
+}
 
 const SAFETY_NONE = [
     { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' },
@@ -55,17 +176,36 @@ function plainKey(item) {
     return typeof item === 'string' ? item : item.key;
 }
 
-/** Try fn(plainKey) for each key; wait between attempts on failure. */
-async function withKeyFallback(apiKey, purpose, fn) {
+/** Try fn(plainKey) for each key; wait between attempts on failure.
+ * @param {*}        apiKey  - single key or array of key objects
+ * @param {string}   purpose - label for logging
+ * @param {function} fn      - (key) => Promise
+ * @param {string|null} model - model being called; used for per-key rate-limit tracking
+ */
+async function withKeyFallback(apiKey, purpose, fn, model = null) {
     const items = keyItems(apiKey);
-    let lastErr;
+    let lastErr = null;
+
     for (let i = 0; i < items.length; i++) {
         const key   = plainKey(items[i]);
         const label = keyLabel(items[i]);
+
+        // Skip this key if it is already rate-limited for this specific model
+        if (model && rlIsBlockedForKey(key, model)) {
+            console.log(`[Gemini] Skipping "${label}" — rate-limited for "${model}"`);
+            if (!lastErr) lastErr = new RateLimitError(model);
+            continue;
+        }
+
         console.log(`[Gemini] ${purpose} → key: "${label}"`);
         try { return await fn(key); }
         catch (e) {
             lastErr = e;
+            if (e instanceof RateLimitError) {
+                if (model) rlMarkBlocked(key, model); // mark this key+model as blocked
+                console.warn(`[Gemini] "${label}" rate-limited (429) for "${e.model}" — trying next key…`);
+                continue; // no delay for 429, try next key immediately
+            }
             console.warn(`[Gemini] "${label}" failed (${purpose}):`, e.message);
             if (i < items.length - 1) {
                 console.log('[Gemini] Waiting 5 s before trying next key…');
@@ -73,7 +213,8 @@ async function withKeyFallback(apiKey, purpose, fn) {
             }
         }
     }
-    throw lastErr;
+
+    throw lastErr ?? new Error('No API keys available');
 }
 
 async function geminiFetch(key, model, payload, action = 'generateContent') {
@@ -83,6 +224,10 @@ async function geminiFetch(key, model, payload, action = 'generateContent') {
         body:    JSON.stringify(payload),
     });
     if (!r.ok) {
+        if (r.status === 429) {
+            // Don't block the model here — withKeyFallback decides after all keys are tried
+            throw new RateLimitError(model);
+        }
         const err = await r.json().catch(() => ({}));
         throw new Error(err.error?.message || `Gemini API Error ${r.status}`);
     }
@@ -90,16 +235,27 @@ async function geminiFetch(key, model, payload, action = 'generateContent') {
 }
 
 /**
- * Try primaryModel across all keys; on total failure try fallbackModel (if provided).
+ * Try models in order, skipping those blocked by rate limit.
+ * Converts all RateLimitErrors into AllModelsRateLimitedError when exhausted.
  */
 async function withModelFallback({ apiKey, purpose, primaryModel, fallbackModel, fn }) {
-    try {
-        return await withKeyFallback(apiKey, `${purpose} [${primaryModel}]`, key => fn(key, primaryModel));
-    } catch (primaryErr) {
-        if (!fallbackModel || fallbackModel === primaryModel) throw primaryErr;
-        console.warn(`[Gemini] ${purpose}: ${primaryModel} failed — falling back to ${fallbackModel}`);
-        return withKeyFallback(apiKey, `${purpose} [${fallbackModel}]`, key => fn(key, fallbackModel));
+    const candidates = [primaryModel];
+    if (fallbackModel && fallbackModel !== primaryModel) candidates.push(fallbackModel);
+
+    let lastErr;
+    for (const model of candidates) {
+        try {
+            return await withKeyFallback(apiKey, `${purpose} [${model}]`, key => fn(key, model), model);
+        } catch (e) {
+            lastErr = e;
+            if (e instanceof RateLimitError) {
+                console.warn(`[Gemini] ${purpose}: "${model}" — wszystkie klucze wyczerpane, próba kolejnego modelu…`);
+                continue;
+            }
+            throw e;
+        }
     }
+    throw new AllModelsRateLimitedError(candidates);
 }
 
 function extractText(data, { softBlock = false } = {}) {
@@ -148,12 +304,13 @@ export function parseMemoryJson(text) {
 export async function callGeminiAPI({
     apiKey, messages, systemPrompt, chatSummary,
     temperature, maxTokens, contextTokens,
+    chatModel,
 }) {
     return withModelFallback({
         apiKey,
-        purpose:     'Chat response',
-        primaryModel:  GEMINI_MODELS.CHAT_PRIMARY,
-        fallbackModel: GEMINI_MODELS.CHAT_FALLBACK,
+        purpose:      'Chat response',
+        primaryModel:  chatModel || GEMINI_MODELS.CHAT_PRIMARY,
+        fallbackModel: chatModel ? null : GEMINI_MODELS.CHAT_FALLBACK,
         fn: (key, model) => _callGeminiChatOnce({
             apiKey: key, model, messages, systemPrompt, chatSummary,
             temperature, maxTokens, contextTokens,
@@ -191,7 +348,7 @@ async function _callGeminiChatOnce({ apiKey, model, messages, systemPrompt, chat
  *   normal — 3 Flash primary, 3.1 Lite on failure
  *   batch  — 3.1 Lite only (low priority / background)
  */
-export async function callGeminiForMemory({ prompt, apiKey, maxOutputTokens = 8192, priority = 'normal' }) {
+export async function callGeminiForMemory({ prompt, apiKey, maxOutputTokens = 8192, priority = 'normal', memoryModel }) {
     const run = async (key, model) => {
         if (window.DEBUG_PROMPTS) {
             console.groupCollapsed(`[Prompt] Memory extraction [${model}]`);
@@ -217,35 +374,33 @@ export async function callGeminiForMemory({ prompt, apiKey, maxOutputTokens = 81
     };
 
     if (priority === 'batch') {
-        return withKeyFallback(apiKey, `Memory extraction [${GEMINI_MODELS.MEMORY_FALLBACK}]`,
-            key => run(key, GEMINI_MODELS.MEMORY_FALLBACK));
+        const batchModel = memoryModel || GEMINI_MODELS.MEMORY_FALLBACK;
+        return singleModelCall(batchModel, apiKey, key => run(key, batchModel));
     }
 
     return withModelFallback({
         apiKey,
         purpose:       'Memory extraction',
-        primaryModel:  GEMINI_MODELS.MEMORY_PRIMARY,
-        fallbackModel: GEMINI_MODELS.MEMORY_FALLBACK,
+        primaryModel:  memoryModel || GEMINI_MODELS.MEMORY_PRIMARY,
+        fallbackModel: memoryModel ? null : GEMINI_MODELS.MEMORY_FALLBACK,
         fn: run,
     });
 }
 
 // ============ SUMMARY ============
 
-export async function callGeminiForSummary({ apiKey, prompt, maxOutputTokens = 8192 }) {
-    return withKeyFallback(apiKey, `Summary [${GEMINI_MODELS.SUMMARY}]`, async (key) => {
+export async function callGeminiForSummary({ apiKey, prompt, maxOutputTokens = 8192, summaryModel }) {
+    const model = summaryModel || GEMINI_MODELS.SUMMARY;
+    return singleModelCall(model, apiKey, (key) => {
         if (window.DEBUG_PROMPTS) {
-            console.groupCollapsed(`[Prompt] Summary [${GEMINI_MODELS.SUMMARY}]`);
+            console.groupCollapsed(`[Prompt] Summary [${model}]`);
             console.log(prompt);
             console.groupEnd();
         }
-
-        const data = await geminiFetch(key, GEMINI_MODELS.SUMMARY, {
+        return geminiFetch(key, model, {
             contents:         [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: { temperature: 0.3, maxOutputTokens, topP: 0.95 },
-        });
-
-        return extractText(data);
+        }).then(data => extractText(data));
     });
 }
 
@@ -255,41 +410,41 @@ export async function callGeminiForSummary({ apiKey, prompt, maxOutputTokens = 8
  * Embed a single text string with Gemini Embedding 2.
  * @returns {number[]} embedding vector
  */
-export async function embedText({ apiKey, text, outputDimensionality = 768 }) {
-    return withKeyFallback(apiKey, `Embedding [${GEMINI_MODELS.EMBEDDING}]`, async (key) => {
-        const data = await geminiFetch(key, GEMINI_MODELS.EMBEDDING, {
+export async function embedText({ apiKey, text, outputDimensionality = 768, embedModel }) {
+    const model = embedModel || GEMINI_MODELS.EMBEDDING;
+    return singleModelCall(model, apiKey, (key) =>
+        geminiFetch(key, model, {
             content:              { parts: [{ text }] },
             outputDimensionality: outputDimensionality,
-        }, 'embedContent');
-
-        const values = data.embedding?.values;
-        if (!values?.length) throw new Error('Empty embedding response from Gemini');
-        return values;
-    });
+        }, 'embedContent').then(data => {
+            const values = data.embedding?.values;
+            if (!values?.length) throw new Error('Empty embedding response from Gemini');
+            return values;
+        })
+    );
 }
 
 /**
  * Embed multiple texts (one vector per text) via batchEmbedContents.
  * @returns {number[][]}
  */
-export async function embedContents({ apiKey, texts, outputDimensionality = 768 }) {
+export async function embedContents({ apiKey, texts, outputDimensionality = 768, embedModel }) {
     if (!texts?.length) return [];
     if (texts.length === 1) {
-        return [await embedText({ apiKey, text: texts[0], outputDimensionality })];
+        return [await embedText({ apiKey, text: texts[0], outputDimensionality, embedModel })];
     }
-
-    return withKeyFallback(apiKey, `Embedding [${GEMINI_MODELS.EMBEDDING}]`, async (key) => {
-        const data = await geminiFetch(key, GEMINI_MODELS.EMBEDDING, {
+    const model = embedModel || GEMINI_MODELS.EMBEDDING;
+    return singleModelCall(model, apiKey, (key) =>
+        geminiFetch(key, model, {
             requests: texts.map(text => ({
-                model:                `models/${GEMINI_MODELS.EMBEDDING}`,
+                model:                `models/${model}`,
                 content:              { parts: [{ text }] },
                 outputDimensionality: outputDimensionality,
             })),
-        }, 'batchEmbedContents');
-
-        const embeddings = data.embeddings;
-        if (!embeddings?.length) throw new Error('Empty embedding response from Gemini');
-
-        return embeddings.map(e => e.values);
-    });
+        }, 'batchEmbedContents').then(data => {
+            const embeddings = data.embeddings;
+            if (!embeddings?.length) throw new Error('Empty embedding response from Gemini');
+            return embeddings.map(e => e.values);
+        })
+    );
 }

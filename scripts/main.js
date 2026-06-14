@@ -1,45 +1,83 @@
 import { openDB }                                                      from './db.js';
-import { loadSettings, persistSettings, getShuffledApiKeys } from './settings.js';
-import { createCharacter, updateCharacter, deleteCharacterById,
-         getCharacterById, getAllCharacters,
-         saveCharacterAvatar, getCharacterAvatar, deleteCharacterAvatar } from './characters.js';
-import { buildSystemPrompt } from './providers/gemini-prompts.js';
+import { loadSettings, persistSettings, getShuffledApiKeys }           from './settings.js';
+import { getCharacterById, getAllCharacters,
+         getCharacterAvatar }                                           from './characters.js';
+import { callChatAPI, buildSystemPrompt, AllModelsRateLimitedError } from './providers/index.js';
 import { createChat, updateChat, deleteChatById,
-         getChatById, getChatsForCharacter }                           from './chats.js';
+         getChatById, getChatsForCharacter }                            from './chats.js';
 import { addMessage, getMessagesForChat, deleteMessageById,
-         deleteMessagesFrom, deleteAllForChat }                        from './messages.js';
-import { getMemoryForChat, saveMemory, updateMemoryFromExchange,
-         seedMemoryFromCharacter, memoryToContext, pruneMemoryByMsgIds } from './memory.js';
-import { callGeminiAPI } from './providers/gemini.js';
+         deleteMessagesFrom, deleteAllForChat }                         from './messages.js';
+import { getMemoryForChat, updateMemoryFromExchange,
+         seedMemoryFromCharacter, memoryToContext,
+         pruneMemoryByMsgIds }                                          from './memory.js';
 import { getSummaryForChat, deleteSummaryForChat,
-         shouldAutoSummarize, generateAndSaveSummary }                 from './summary.js';
-import { exportChat, importChatFromFile }                              from './export.js';
-import { escapeHtml, parseMessageMarkup, showToast, formatTimestamp }  from './ui.js';
+         shouldAutoSummarize, generateAndSaveSummary }                  from './summary.js';
+import { exportChat, importChatFromFile }                               from './export.js';
+import { escapeHtml, parseMessageMarkup, showToast, formatTimestamp }   from './ui.js';
+
+import {
+    GEMINI_DEFAULTS,
+    resolveChatConfig,
+    buildDefaultChatConfig as _buildDefault,
+} from './chat-config.js';
+
+// ============ PROVIDER CONFIG ============
+
+/** Format AllModelsRateLimitedError into a short user-visible string. */
+function formatRateLimitMsg(e) {
+    if (!(e instanceof AllModelsRateLimitedError)) return e.message;
+    return e.message; // already contains human-readable time from the constructor
+}
+
+/**
+ * Build a providerConfig for a given task role from the current per-chat config.
+ * Uses geminiModel or ollamaModel depending on the active provider.
+ */
+function getProviderConfig(role = 'chat') {
+    const cfg      = currentChatConfig || GEMINI_DEFAULTS;
+    const taskCfg  = cfg[role] || GEMINI_DEFAULTS[role] || {};
+    const provider = taskCfg.provider || 'gemini';
+    const model    = provider === 'ollama'
+        ? (taskCfg.ollamaModel || null)
+        : (taskCfg.geminiModel || null);
+    return {
+        provider,
+        keys:      getShuffledApiKeys(cfg),
+        ollamaUrl: cfg.ollamaBaseUrl || 'http://localhost:11434',
+        model,
+        lang:      cfg.chatLang || 'pl',
+    };
+}
+
+/** Return the task-level generation params (temperature, maxTokens, …) for a role. */
+function getTaskCfg(role) {
+    const cfg = currentChatConfig || GEMINI_DEFAULTS;
+    return cfg[role] || GEMINI_DEFAULTS[role] || {};
+}
+
+/** Build initial chat config for a new chat, seeded with global API keys. */
+function buildDefaultChatConfig() {
+    return _buildDefault(settings.apiKeys, settings.ollamaBaseUrl);
+}
 
 // ============ STATE ============
-// ============ PROVIDER HELPERS ============
-function getProviderConfig() {
-    return { provider: 'gemini', keys: getShuffledApiKeys(settings), model: null };
-}
 let settings             = {};
 let currentCharacter     = null;
 let currentChat          = null;
+let currentChatConfig    = null;
 let currentMessages      = [];
 let currentMemory        = null;
-let currentChatSummary   = null;  // rolling summary from IndexedDB
+let currentChatSummary   = null;
 let isLoading            = false;
 let lastFailedMessage    = null;
-let currentSummary       = '';    // text shown in summary modal
+let currentSummary       = '';
 let memoryPanelOpen      = false;
-let editingCharId        = null;
-let aiResponseCount      = 0;     // counts AI replies; memory update every N
-let pendingRequests      = 0;     // counts in-flight LLM requests (chat + memory + summary)
-let currentCharacterAvatarUrl = null; // Object URL for current character's avatar blob
-let _pendingAvatarBlob   = null;  // null=no change, false=delete, File=new blob
+let aiResponseCount      = 0;
+let pendingRequests      = 0;
+let currentCharacterAvatarUrl = null;
 
-const MEMORY_UPDATE_EVERY = 1;    // update memory after every AI response
+const MEMORY_UPDATE_EVERY = 1;
 
-/** Lock/unlock the send input based on pendingRequests counter. */
 function setPendingRequest(delta) {
     pendingRequests = Math.max(0, pendingRequests + delta);
     const input   = document.getElementById('message-input');
@@ -50,94 +88,25 @@ function setPendingRequest(delta) {
 }
 
 // ============ SCROLL BUTTONS ============
-let isNearTop = true;
+let isNearTop    = true;
 let isNearBottom = true;
 
 function updateScrollButtonVisibility() {
     const container = document.getElementById('messages-container');
     if (!container) return;
-    
-    const scrollTop = container.scrollTop;
-    const scrollHeight = container.scrollHeight;
-    const clientHeight = container.clientHeight;
+    const { scrollTop, scrollHeight, clientHeight } = container;
     const threshold = 100;
-    
-    // Debug log for mobile testing
-    //console.log('Scroll update:', { scrollTop, scrollHeight, clientHeight, threshold });
-    
-    // Check if near top
+
     isNearTop = scrollTop < threshold;
-    const topBtn = document.getElementById('scroll-to-top');
-    if (topBtn) {
-        if (isNearTop) {
-            topBtn.classList.remove('visible');
-        } else {
-            topBtn.classList.add('visible');
-        }
-    }
-    
-    // Check if near bottom
+    document.getElementById('scroll-to-top')?.classList.toggle('visible', !isNearTop);
+
     const distFromBottom = scrollHeight - (scrollTop + clientHeight);
     isNearBottom = distFromBottom < threshold;
-    const bottomBtn = document.getElementById('scroll-to-bottom');
-    if (bottomBtn) {
-        if (isNearBottom) {
-            bottomBtn.classList.remove('visible');
-        } else {
-            bottomBtn.classList.add('visible');
-        }
-    }
+    document.getElementById('scroll-to-bottom')?.classList.toggle('visible', !isNearBottom);
 }
 
-function scrollToMessagesTop() {
-    const container = document.getElementById('messages-container');
-    if (!container) {
-        console.warn('[Scroll] messages-container not found');
-        return;
-    }
-    const rect = container.getBoundingClientRect();
-    const compStyle = window.getComputedStyle(container);
-    console.log('[Scroll] TOP - Container details:', {
-        scrollHeight: container.scrollHeight,
-        clientHeight: container.clientHeight,
-        offsetHeight: container.offsetHeight,
-        scrollTop: container.scrollTop,
-        overflowY: compStyle.overflowY,
-        height: compStyle.height,
-        rectHeight: rect.height
-    });
-    
-    container.scrollTop = 0;
-    setTimeout(() => {
-        console.log('[Scroll] TOP - After scrollTop=0:', { scrollTop: container.scrollTop });
-    }, 50);
-}
-
-function scrollToMessagesBottom() {
-    const container = document.getElementById('messages-container');
-    if (!container) {
-        console.warn('[Scroll] messages-container not found');
-        return;
-    }
-    const rect = container.getBoundingClientRect();
-    const compStyle = window.getComputedStyle(container);
-    const targetScroll = Math.max(container.scrollHeight - container.clientHeight, 0);
-    console.log('[Scroll] BOTTOM - Container details:', {
-        scrollHeight: container.scrollHeight,
-        clientHeight: container.clientHeight,
-        offsetHeight: container.offsetHeight,
-        scrollTop: container.scrollTop,
-        targetScroll: targetScroll,
-        overflowY: compStyle.overflowY,
-        height: compStyle.height,
-        rectHeight: rect.height
-    });
-    
-    container.scrollTop = targetScroll;
-    setTimeout(() => {
-        console.log('[Scroll] BOTTOM - After scrollTop set:', { scrollTop: container.scrollTop, targetScroll });
-    }, 50);
-}
+function scrollToMessagesTop()    { const c = document.getElementById('messages-container'); if (c) c.scrollTop = 0; }
+function scrollToMessagesBottom() { const c = document.getElementById('messages-container'); if (c) c.scrollTop = Math.max(c.scrollHeight - c.clientHeight, 0); }
 
 // ============ INIT ============
 async function init() {
@@ -147,11 +116,24 @@ async function init() {
         window.DEBUG_PROMPTS = !!settings.debugPrompts;
         applyChatFontSize(settings.chatFontSize ?? 14);
 
+        // Restore state after returning from a sub-page
+        const savedCharId = sessionStorage.getItem('returnCharId');
+        const savedChatId = sessionStorage.getItem('returnChatId');
+        sessionStorage.removeItem('returnCharId');
+        sessionStorage.removeItem('returnChatId');
+
         const chars = await getAllCharacters();
         if (chars.length === 0) {
             showWelcomeScreen();
         } else {
-            await selectCharacter(chars[0].id);
+            const targetChar = savedCharId ? chars.find(c => String(c.id) === savedCharId) : null;
+            await selectCharacter((targetChar || chars[0]).id);
+
+            if (savedChatId) {
+                const chatIdNum = parseInt(savedChatId);
+                const savedChat = await getChatById(chatIdNum);
+                if (savedChat) await selectChat(chatIdNum);
+            }
         }
 
         setupEventListeners();
@@ -171,43 +153,27 @@ function setupEventListeners() {
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
     });
-    document.getElementById('temperature')?.addEventListener('input', e => {
-        const el = document.getElementById('temperature-value');
-        if (el) el.textContent = e.target.value;
-    });
-    
-    // Scroll buttons listener and initialization
-    const messagesContainer = document.getElementById('messages-container');
-    if (messagesContainer) {
-        messagesContainer.addEventListener('scroll', updateScrollButtonVisibility);
-        // Ensure buttons are visible on init
+
+    const mc = document.getElementById('messages-container');
+    if (mc) {
+        mc.addEventListener('scroll', updateScrollButtonVisibility);
         updateScrollButtonVisibility();
-        // Also ensure buttons container has pointer-events
-        const scrollBtnContainer = document.querySelector('.scroll-buttons');
-        if (scrollBtnContainer) {
-            scrollBtnContainer.style.pointerEvents = 'auto';
-        }
+        document.querySelector('.scroll-buttons')?.style.setProperty('pointer-events', 'auto');
     }
-    
-    // Add click listeners for scroll buttons (for better mobile support)
-    const topBtn = document.getElementById('scroll-to-top');
-    const bottomBtn = document.getElementById('scroll-to-bottom');
-    if (topBtn) {
-        topBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('[Scroll] Top button clicked');
-            scrollToMessagesTop();
-        });
-    }
-    if (bottomBtn) {
-        bottomBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('[Scroll] Bottom button clicked');
-            scrollToMessagesBottom();
-        });
-    }
+}
+
+// ============ NAVIGATION TO SUB-PAGES ============
+function navigateToCharEditor(charId) {
+    sessionStorage.setItem('returnCharId', String(currentCharacter?.id || ''));
+    sessionStorage.setItem('returnChatId', String(currentChat?.id || ''));
+    window.location.href = charId ? `character.html?id=${charId}` : 'character.html';
+}
+
+function navigateToChatSettings() {
+    if (!currentChat) { showToast('Najpierw otwórz czat', 'error'); return; }
+    sessionStorage.setItem('returnCharId', String(currentCharacter?.id || ''));
+    sessionStorage.setItem('returnChatId', String(currentChat.id));
+    window.location.href = `chat-settings.html?chatId=${currentChat.id}`;
 }
 
 // ============ CHARACTER MANAGEMENT ============
@@ -222,24 +188,10 @@ async function loadCharacterAvatar(charId) {
     }
 }
 
-function _showAvatarEditorPreview(url) {
-    const preview   = document.getElementById('char-avatar-preview');
-    const removeBtn = document.getElementById('char-avatar-remove');
-    if (!preview) return;
-    if (url) {
-        preview.innerHTML = `<img src="${url}" class="char-avatar-preview-img" alt="Avatar">`;
-        if (removeBtn) removeBtn.style.display = '';
-    } else {
-        preview.innerHTML = `<span class="char-avatar-placeholder">Brak zdjęcia</span>`;
-        if (removeBtn) removeBtn.style.display = 'none';
-    }
-}
-
 async function selectCharacter(charId) {
     currentCharacter = await getCharacterById(charId);
     if (!currentCharacter) return;
 
-    // Load avatar and update sidebar
     await loadCharacterAvatar(charId);
 
     const el = document.getElementById('current-char-name');
@@ -265,7 +217,8 @@ async function selectCharacter(charId) {
 async function createNewChat() {
     if (!currentCharacter) { showToast('Select a character first', 'error'); return; }
 
-    const chat = await createChat(currentCharacter.id);
+    const initConfig = buildDefaultChatConfig();
+    const chat = await createChat(currentCharacter.id, initConfig);
 
     if (currentCharacter.welcomeMessage) {
         const msg = await addMessage(chat.id, 'assistant', currentCharacter.welcomeMessage);
@@ -277,27 +230,25 @@ async function createNewChat() {
         });
     }
 
-    currentChat = await getChatById(chat.id);
+    currentChat       = await getChatById(chat.id);
+    currentChatConfig = resolveChatConfig(currentChat);
     await selectChat(currentChat.id);
     renderChatList(await getChatsForCharacter(currentCharacter.id));
 
-    // Seed structured memory from character definition, then refresh panel
-    const memCfgSeed = getProviderConfig('memoryProvider');
-    const apiKeys = memCfgSeed.keys;
-    if (apiKeys.length) {
-        setTimeout(async () => {
-            const seeded = await seedMemoryFromCharacter(chat.id, currentCharacter, apiKeys, null, settings.memoryTokens ?? 8192, memCfgSeed);
-            if (seeded && currentChat?.id === chat.id) {
-                currentMemory = seeded;
-                renderMemoryPanel();
-            }
-        }, 300);
-    }
+    const memCfgSeed = getProviderConfig('memory');
+    setTimeout(async () => {
+        const seeded = await seedMemoryFromCharacter(chat.id, currentCharacter, memCfgSeed, null, getTaskCfg('memory').maxTokens ?? 8192);
+        if (seeded && currentChat?.id === chat.id) {
+            currentMemory = seeded;
+            renderMemoryPanel();
+        }
+    }, 300);
 }
 
 async function selectChat(chatId) {
     currentChat        = await getChatById(chatId);
     if (!currentChat) return;
+    currentChatConfig  = resolveChatConfig(currentChat);
     currentMessages    = await getMessagesForChat(chatId);
     currentMemory      = await getMemoryForChat(chatId);
     currentChatSummary = await getSummaryForChat(chatId);
@@ -327,7 +278,7 @@ async function deleteChatConfirm(chatId) {
     renderChatList(chats);
 
     if (currentChat?.id === chatId) {
-        currentChat = null; currentMessages = []; currentMemory = null;
+        currentChat = null; currentMessages = []; currentMemory = null; currentChatConfig = null;
         if (chats.length > 0) await selectChat(chats[0].id);
         else showWelcomeScreen();
     }
@@ -341,14 +292,16 @@ async function appSendMessage(retryText) {
     if (!message || isLoading)     return;
     if (!currentChat)              { showToast('Select a chat first', 'error'); return; }
 
-    const chatCfg  = getProviderConfig('chatProvider');
-    const apiKeys  = chatCfg.keys;
-    if (!apiKeys.length) { showToast('Dodaj klucz API w Ustawieniach', 'error'); return; }
+    const chatCfg  = getProviderConfig('chat');
+    const embedCfg = getProviderConfig('embed');
+
+    if (chatCfg.provider === 'gemini' && !chatCfg.keys.length) {
+        showToast('Dodaj klucz API Gemini w ustawieniach czatu', 'error'); return;
+    }
 
     const userMsg = await addMessage(currentChat.id, 'user', message);
     currentMessages = [...currentMessages, userMsg];
 
-    // Auto-title on first user message
     if (currentMessages.filter(m => m.role === 'user').length === 1) {
         const title = message.substring(0, 55) + (message.length > 55 ? '…' : '');
         await updateChat(currentChat.id, { title });
@@ -365,15 +318,17 @@ async function appSendMessage(retryText) {
     showTypingIndicator();
 
     try {
-        const memCtx       = await memoryToContext(currentMemory, { query: message, apiKey: apiKeys });
-        const systemPrompt  = buildSystemPrompt(currentCharacter, memCtx);
+        const memCtx      = await memoryToContext(currentMemory, { query: message, cfg: embedCfg });
+        const systemPrompt = buildSystemPrompt(chatCfg, currentCharacter, memCtx);
+        const chatTask     = getTaskCfg('chat');
 
-        const response = await callGeminiAPI({
-            apiKey: apiKeys, messages: currentMessages, systemPrompt,
+        const response = await callChatAPI(chatCfg, {
+            messages:      currentMessages,
+            systemPrompt,
             chatSummary:   currentChatSummary,
-            temperature:   settings.temperature,
-            maxTokens:     settings.maxTokens,
-            contextTokens: settings.contextTokens,
+            temperature:   chatTask.temperature,
+            maxTokens:     chatTask.maxTokens,
+            contextTokens: chatTask.contextTokens,
         });
 
         const aiMsg = await addMessage(currentChat.id, 'assistant', response);
@@ -391,15 +346,12 @@ async function appSendMessage(retryText) {
         renderMessages();
         renderChatList(await getChatsForCharacter(currentCharacter.id));
 
-        // Background memory update every MEMORY_UPDATE_EVERY exchanges (rate-limit friendly)
         aiResponseCount++;
-        console.log(`[Memory] AI response #${aiResponseCount} — update in ${MEMORY_UPDATE_EVERY - ((aiResponseCount - 1) % MEMORY_UPDATE_EVERY)} more`);
         if (aiResponseCount % MEMORY_UPDATE_EVERY === 0) {
             setTimeout(() => triggerMemoryUpdate(message, response, aiMsg.seqId), 500);
         }
 
-        // Auto-summary every AI_RESPONSES_PER_SUMMARY AI replies (non-blocking)
-        if (shouldAutoSummarize(currentMessages, currentChatSummary, settings.summaryEvery ?? 10)) {
+        if (shouldAutoSummarize(currentMessages, currentChatSummary, getTaskCfg('summary').everyN ?? 10)) {
             setTimeout(() => triggerAutoSummary(), 800);
         }
 
@@ -409,7 +361,13 @@ async function appSendMessage(retryText) {
         lastFailedMessage = message;
         renderMessages();
         showRetryBar(message);
-        showToast(err.message, 'error');
+        if (err instanceof AllModelsRateLimitedError) {
+            showToast(formatRateLimitMsg(err), 'error', 8000);
+            document.getElementById('message-input')?.setAttribute('disabled', 'true');
+            document.getElementById('send-btn')?.setAttribute('disabled', 'true');
+        } else {
+            showToast(err.message, 'error');
+        }
     } finally {
         isLoading = false;
         setPendingRequest(-1);
@@ -418,24 +376,29 @@ async function appSendMessage(retryText) {
 }
 
 async function triggerMemoryUpdate(userMsg, aiMsg, aiMsgSeqId = null) {
-    const memCfg = getProviderConfig('memoryProvider');
+    const memCfg   = getProviderConfig('memory');
+    const embedCfg = getProviderConfig('embed');
     setPendingRequest(+1);
     try {
         currentMemory = await updateMemoryFromExchange(
-            currentChat.id, userMsg, aiMsg, memCfg.keys,
-            currentCharacter, currentMessages, settings.memoryTokens ?? 8192,
-            memCfg, aiMsgSeqId
+            currentChat.id, userMsg, aiMsg, memCfg,
+            currentCharacter, currentMessages, getTaskCfg('memory').maxTokens ?? 8192,
+            aiMsgSeqId, embedCfg
         );
         renderMemoryPanel();
     } catch (e) {
-        console.warn('[Memory] Background update failed:', e);
+        if (e instanceof AllModelsRateLimitedError) {
+            showToast(formatRateLimitMsg(e), 'error', 8000);
+        } else {
+            console.warn('[Memory] Background update failed:', e);
+        }
     } finally {
         setPendingRequest(-1);
     }
 }
 
 async function triggerAutoSummary() {
-    const sumCfg  = getProviderConfig('summaryProvider');
+    const sumCfg  = getProviderConfig('summary');
     const chatId   = currentChat?.id;
     const messages = [...currentMessages];
     const char     = currentCharacter;
@@ -446,16 +409,18 @@ async function triggerAutoSummary() {
     setPendingRequest(+1);
     try {
         const newSummary = await generateAndSaveSummary(
-            chatId, messages, char, existing, sumCfg.keys,
-            settings.summaryTokens ?? 8192,
-            sumCfg
+            chatId, messages, char, existing, sumCfg,
+            getTaskCfg('summary').maxTokens ?? 8192
         );
         if (currentChat?.id === chatId) {
             currentChatSummary = newSummary;
-            console.log('[Summary] Auto-summary saved, covers', newSummary.upToMessageCount, 'messages');
         }
     } catch (e) {
-        console.warn('[Summary] Auto-summary failed:', e.message);
+        if (e instanceof AllModelsRateLimitedError) {
+            showToast(formatRateLimitMsg(e), 'error', 8000);
+        } else {
+            console.warn('[Summary] Auto-summary failed:', e.message);
+        }
     } finally {
         setPendingRequest(-1);
     }
@@ -463,12 +428,10 @@ async function triggerAutoSummary() {
 
 // ============ RETRY ============
 function showRetryBar(msg) {
-    const bar     = document.getElementById('retry-bar');
+    document.getElementById('retry-bar')?.classList.remove('hidden');
     const preview = document.getElementById('retry-message-preview');
-    bar?.classList.remove('hidden');
     if (preview) preview.textContent = msg.substring(0, 65) + (msg.length > 65 ? '…' : '');
 }
-
 function hideRetryBar() {
     document.getElementById('retry-bar')?.classList.add('hidden');
 }
@@ -517,8 +480,8 @@ function showTypingIndicator() {
     const c = document.getElementById('messages-container');
     if (!c || c.querySelector('.typing-message')) return;
     const d = document.createElement('div');
-    d.className  = 'message ai typing-message';
-    d.innerHTML  = `<div class="message-wrapper"><div class="message-content">
+    d.className = 'message ai typing-message';
+    d.innerHTML = `<div class="message-wrapper"><div class="message-content">
         <div class="typing-indicator">
             <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
         </div></div></div>`;
@@ -526,14 +489,9 @@ function showTypingIndicator() {
     c.scrollTop = c.scrollHeight;
     updateScrollButtonVisibility();
 }
-
-function hideTypingIndicator() {
-    document.querySelector('.typing-message')?.remove();
-}
+function hideTypingIndicator() { document.querySelector('.typing-message')?.remove(); }
 
 function applyChatFontSize(size) {
-    // Set a single CSS custom property on :root — all referenced rules pick it up automatically,
-    // including dynamically-rendered memory panel content that would lose inline styles on re-render.
     document.documentElement.style.setProperty('--chat-font-size', `${size}px`);
 }
 
@@ -586,58 +544,37 @@ function renderMemoryPanel() {
                 <div class="memory-section-title">${label}</div>
                 ${sorted.length
                     ? `<ul class="memory-list">${sorted.map(i => {
-                        const text  = escapeHtml(i.text || i);
-                        const count = i.count || 1;
-                        const badge = count > 1 ? `<span class="mem-count" title="wspomniano ${count} razy">x${count}</span>` : '';
-                        const dateStr = i.firstSeen
-                            ? new Date(i.firstSeen).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                            : '';
+                        const text      = escapeHtml(i.text || i);
+                        const count     = i.count || 1;
+                        const badge     = count > 1 ? `<span class="mem-count" title="wspomniano ${count} razy">x${count}</span>` : '';
+                        const dateStr   = i.firstSeen ? new Date(i.firstSeen).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
                         const dateBadge = dateStr ? `<span class="mem-date" title="Pierwsze pojawienie: ${dateStr}">${dateStr}</span>` : '';
-                        const msgBadge  = i.createdAtMsgId != null
-                            ? `<span class="mem-msgid" title="Powstało przy wiadomości #${i.createdAtMsgId}">msg#${i.createdAtMsgId}</span>`
-                            : '';
+                        const msgBadge  = i.createdAtMsgId != null ? `<span class="mem-msgid" title="Powstało przy wiadomości #${i.createdAtMsgId}">msg#${i.createdAtMsgId}</span>` : '';
                         return `<li>${text}${badge}${dateBadge}${msgBadge}</li>`;
                       }).join('')}</ul>`
                     : `<p class="memory-empty-section">Nothing recorded yet</p>`}
             </div>`;
     };
 
-    const charSections = [
-        ['charProfile',  '🧬 Self-profile'],
-        ['charGoals',    '🎯 Own goals'],
-        ['charMemories', '📖 Own memories'],
-    ];
-    const userSections = [
-        ['profile',  '📋 User profile'],
-        ['goals',    '🏆 User goals'],
-        ['memories', '💭 Shared memories'],
-    ];
-
     body.innerHTML =
         `<div class="memory-group-title">About ${escapeHtml(currentCharacter?.name || 'Character')}</div>` +
-        charSections.map(([k, l]) => renderSection(k, l)).join('') +
+        [['charProfile','🧬 Self-profile'],['charGoals','🎯 Own goals'],['charMemories','📖 Own memories']].map(([k,l]) => renderSection(k,l)).join('') +
         `<div class="memory-group-title">About the User</div>` +
-        userSections.map(([k, l]) => renderSection(k, l)).join('');
+        [['profile','📋 User profile'],['goals','🏆 User goals'],['memories','💭 Shared memories']].map(([k,l]) => renderSection(k,l)).join('');
 }
 
 async function refreshMemory() {
     if (!currentChat || currentMessages.length < 2) {
-        showToast('Need more conversation to refresh memory', 'info');
-        return;
+        showToast('Need more conversation to refresh memory', 'info'); return;
     }
-    const memCfg = getProviderConfig('memoryProvider');
-    const apiKeys = memCfg.keys;
-    if (!apiKeys.length) { showToast('API key required', 'error'); return; }
-
+    const memCfg  = getProviderConfig('memory');
     showToast('Updating memory…', 'info');
     const lastUser = [...currentMessages].reverse().find(m => m.role === 'user');
     const lastAi   = [...currentMessages].reverse().find(m => m.role === 'assistant');
-
     if (lastUser && lastAi) {
         currentMemory = await updateMemoryFromExchange(
-            currentChat.id, lastUser.content, lastAi.content, apiKeys,
-            currentCharacter, currentMessages, settings.memoryTokens ?? 8192,
-            memCfg
+            currentChat.id, lastUser.content, lastAi.content, memCfg,
+            currentCharacter, currentMessages, getTaskCfg('memory').maxTokens ?? 8192
         );
         renderMemoryPanel();
         showToast('Memory updated', 'success');
@@ -650,7 +587,6 @@ async function deleteMessageFrom(msgId) {
     const { remaining, deletedSeqIds } = await deleteMessagesFrom(currentChat.id, msgId);
     currentMessages = remaining;
 
-    // Remove memory items that were created during the deleted messages
     if (deletedSeqIds.length) {
         currentMemory = await pruneMemoryByMsgIds(currentChat.id, deletedSeqIds) ?? currentMemory;
         if (memoryPanelOpen) renderMemoryPanel();
@@ -667,31 +603,19 @@ async function deleteMessageFrom(msgId) {
     renderChatList(await getChatsForCharacter(currentCharacter.id));
 }
 
-// ============ SETTINGS ============
+// ============ GLOBAL SETTINGS MODAL ============
 async function openSettings() {
-    const el = document.getElementById('temperature');
-    if (el) {
-        el.value = settings.temperature;
-        const valEl = document.getElementById('temperature-value');
-        if (valEl) valEl.textContent = settings.temperature;
-    }
-    const mt = document.getElementById('max-tokens');
-    const ct = document.getElementById('context-tokens');
-    const mem = document.getElementById('memory-tokens');
-    const st  = document.getElementById('summary-tokens');
-    const se  = document.getElementById('summary-every');
-    const dp = document.getElementById('debug-prompts');
-    if (mt)  mt.value      = settings.maxTokens;
-    if (ct)  ct.value      = settings.contextTokens;
-    if (mem) mem.value     = settings.memoryTokens  ?? 8192;
-    if (st)  st.value      = settings.summaryTokens ?? 8192;
-    if (se)  se.value      = settings.summaryEvery  ?? 10;
-    if (dp)  dp.checked    = !!settings.debugPrompts;
-    const fs = document.getElementById('chat-font-size');
+    const dp    = document.getElementById('debug-prompts');
+    const obu   = document.getElementById('ollama-base-url');
+    const fs    = document.getElementById('chat-font-size');
     const fsVal = document.getElementById('chat-font-size-value');
     const curFs = settings.chatFontSize ?? 14;
-    if (fs) fs.value = curFs;
+
+    if (dp)    dp.checked        = !!settings.debugPrompts;
+    if (obu)   obu.value         = settings.ollamaBaseUrl || 'http://localhost:11434';
+    if (fs)    fs.value          = curFs;
     if (fsVal) fsVal.textContent = curFs;
+
     renderApiKeysList();
     openModal('settings-modal');
 }
@@ -729,155 +653,20 @@ function removeApiKey(idx) {
 }
 
 async function handleSaveSettings() {
-    const temp = document.getElementById('temperature');
-    const mt   = document.getElementById('max-tokens');
-    const ct   = document.getElementById('context-tokens');
-    if (temp) settings.temperature   = parseFloat(temp.value);
-    if (mt)   settings.maxTokens     = parseInt(mt.value);
-    if (ct)   settings.contextTokens = parseInt(ct.value);
-    const mem = document.getElementById('memory-tokens');
-    const st  = document.getElementById('summary-tokens');
-    const se  = document.getElementById('summary-every');
-    if (mem) settings.memoryTokens  = parseInt(mem.value);
-    if (st)  settings.summaryTokens = parseInt(st.value);
-    if (se)  settings.summaryEvery  = parseInt(se.value);
-    const dp = document.getElementById('debug-prompts');
-    if (dp)   settings.debugPrompts  = dp.checked;
+    const dp  = document.getElementById('debug-prompts');
+    const obu = document.getElementById('ollama-base-url');
+    const fs  = document.getElementById('chat-font-size');
+
+    if (dp)  settings.debugPrompts  = dp.checked;
+    if (obu) settings.ollamaBaseUrl = obu.value.trim() || 'http://localhost:11434';
+    if (fs)  settings.chatFontSize  = parseInt(fs.value);
+
     window.DEBUG_PROMPTS = !!settings.debugPrompts;
-    const fs = document.getElementById('chat-font-size');
-    if (fs) settings.chatFontSize = parseInt(fs.value);
     applyChatFontSize(settings.chatFontSize ?? 14);
+
     await persistSettings(settings);
     closeModal('settings-modal');
-    showToast('Settings saved', 'success');
-}
-
-// ============ CHARACTER EDITOR ============
-async function openCharacterEditor(charId) {
-    editingCharId = charId;
-    const titleEl     = document.getElementById('character-modal-title');
-    const deleteBtn   = document.getElementById('char-delete-btn');
-    if (titleEl)   titleEl.textContent    = charId ? 'Edit Character' : 'New Character';
-    if (deleteBtn) deleteBtn.style.display = charId ? '' : 'none';
-
-    const fields = {
-        'char-name':     '',
-        'char-prompt':   'You are a helpful, friendly AI assistant. Be conversational and engaging.',
-        'char-welcome':  'Hello! How can I help you?',
-        'char-scenario': '',
-        'char-details':  '',
-        'char-dialogue': '',
-    };
-
-    // Reset pending avatar state when opening editor
-    _pendingAvatarBlob = null;
-
-    if (charId) {
-        const char = await getCharacterById(charId);
-        if (char) {
-            fields['char-name']     = char.name             || '';
-            fields['char-prompt']   = char.prompt           || '';
-            fields['char-welcome']  = char.welcomeMessage   || '';
-            fields['char-scenario'] = char.scenario         || '';
-            fields['char-details']  = char.characterDetails || '';
-            fields['char-dialogue'] = char.dialogueExamples || '';
-        }
-    }
-
-    for (const [id, val] of Object.entries(fields)) {
-        const el = document.getElementById(id);
-        if (el) el.value = val;
-    }
-
-    // Show existing avatar preview
-    const existingBlob = charId ? await getCharacterAvatar(charId) : null;
-    _showAvatarEditorPreview(existingBlob ? URL.createObjectURL(existingBlob) : null);
-    // reset file input
-    const fi = document.getElementById('char-avatar-input');
-    if (fi) fi.value = '';
-
-    openModal('character-modal');
-}
-
-async function saveCharacter() {
-    const nameEl = document.getElementById('char-name');
-    const name   = nameEl?.value.trim();
-    if (!name) { showToast('Character name is required', 'error'); return; }
-
-    const data = {
-        name,
-        prompt:           document.getElementById('char-prompt')?.value   || '',
-        welcomeMessage:   document.getElementById('char-welcome')?.value  || '',
-        scenario:         document.getElementById('char-scenario')?.value || '',
-        characterDetails: document.getElementById('char-details')?.value  || '',
-        dialogueExamples: document.getElementById('char-dialogue')?.value || '',
-    };
-
-    let char;
-    if (editingCharId) {
-        char = await updateCharacter(editingCharId, data);
-    } else {
-        char = await createCharacter(data);
-    }
-
-    closeModal('character-modal');
-    showToast(`Character "${char.name}" saved`, 'success');
-
-    // Persist avatar
-    if (_pendingAvatarBlob === false) {
-        await deleteCharacterAvatar(char.id);
-    } else if (_pendingAvatarBlob instanceof Blob) {
-        await saveCharacterAvatar(char.id, _pendingAvatarBlob);
-    }
-    _pendingAvatarBlob = null;
-
-    await selectCharacter(char.id);
-
-    // Seed/refresh memory from character definition for all chats (new + edited)
-    const memCfgChar = getProviderConfig('memoryProvider');
-    const apiKeys = memCfgChar.keys;
-    if (apiKeys.length) {
-        const chats = await getChatsForCharacter(char.id);
-        for (const c of chats) {
-            setTimeout(async () => {
-                const seeded = await seedMemoryFromCharacter(c.id, char, apiKeys, null, settings.memoryTokens ?? 8192, memCfgChar);
-                if (seeded && currentChat?.id === c.id) {
-                    currentMemory = seeded;
-                    renderMemoryPanel();
-                }
-            }, 600);
-        }
-    }
-}
-
-async function deleteCurrentCharacter() {
-    if (!editingCharId) return;
-    const char = await getCharacterById(editingCharId);
-    if (!confirm(`Delete character "${char?.name}"? All associated chats will also be deleted.`)) return;
-
-    const chats = await getChatsForCharacter(editingCharId);
-    for (const c of chats) {
-        await deleteAllForChat(c.id);
-        await deleteChatById(c.id);
-    }
-    await deleteCharacterById(editingCharId);
-    await deleteCharacterAvatar(editingCharId);
-    closeModal('character-modal');
-    showToast('Character deleted', 'success');
-
-    const remaining = await getAllCharacters();
-    if (remaining.length > 0) {
-        await selectCharacter(remaining[0].id);
-    } else {
-        currentCharacter = null; currentChat = null; currentMessages = []; currentMemory = null;
-        showWelcomeScreen();
-        const cl = document.getElementById('chat-list');
-        if (cl) cl.innerHTML = '';
-        const cn = document.getElementById('current-char-name');
-        const ca = document.getElementById('current-char-avatar');
-        if (cn) cn.textContent = 'No Character';
-        if (ca) ca.textContent = '?';
-    }
+    showToast('Ustawienia globalne zapisane', 'success');
 }
 
 // ============ CHARACTER LIST MODAL ============
@@ -909,18 +698,16 @@ async function selectCharacterAndClose(charId) {
     await selectCharacter(charId);
 }
 
-async function editCharacterFromList(charId) {
+function editCharacterFromList(charId) {
     closeModal('character-list-modal');
-    await openCharacterEditor(charId);
+    navigateToCharEditor(charId);
 }
 
 // ============ SUMMARY ============
 async function generateSummary() {
     if (!currentMessages.length) { showToast('No messages to summarize', 'error'); return; }
-    if (!currentChat)            { showToast('No chat selected', 'error'); return; }
-    const sumCfg  = getProviderConfig('summaryProvider');
-    const apiKeys = sumCfg.keys;
-    if (!apiKeys.length) { showToast('API key required', 'error'); return; }
+    if (!currentChat)            { showToast('No chat selected', 'error');          return; }
+    const sumCfg = getProviderConfig('summary');
 
     const summaryContent = document.getElementById('summary-content');
     const infoEl         = document.getElementById('summary-info');
@@ -937,11 +724,9 @@ async function generateSummary() {
     openModal('summary-modal');
 
     try {
-        // Generate and persist as rolling summary
         const record = await generateAndSaveSummary(
-            currentChat.id, currentMessages, currentCharacter, currentChatSummary, apiKeys,
-            settings.summaryTokens ?? 8192,
-            sumCfg
+            currentChat.id, currentMessages, currentCharacter, currentChatSummary,
+            sumCfg, getTaskCfg('summary').maxTokens ?? 8192
         );
         currentChatSummary = record;
         currentSummary     = record?.text || '';
@@ -961,7 +746,7 @@ async function generateSummary() {
 
 async function clearChatSummary() {
     if (!currentChat) return;
-    if (!confirm('Delete the saved summary for this chat? The next auto-summary will start fresh.')) return;
+    if (!confirm('Delete the saved summary for this chat?')) return;
     await deleteSummaryForChat(currentChat.id);
     currentChatSummary = null;
     showToast('Summary cleared', 'success');
@@ -999,7 +784,6 @@ async function handleImportChat(file) {
     } catch (err) {
         showToast('Import failed: ' + err.message, 'error');
     }
-    // Reset file input so the same file can be imported again
     const el = document.getElementById('import-file');
     if (el) el.value = '';
 }
@@ -1031,7 +815,7 @@ function showWelcomeScreen() {
         </div>`;
 }
 
-// ============ EXPOSE PUBLIC API ============
+// ============ PUBLIC API ============
 window.app = {
     sendMessage:              appSendMessage,
     createNewChat,
@@ -1045,10 +829,8 @@ window.app = {
     addApiKeyRow,
     removeApiKey,
 
-    openCharacterEditor,
-    closeCharacterEditor:     () => closeModal('character-modal'),
-    saveCharacter,
-    deleteCurrentCharacter,
+    openChatSettings:         navigateToChatSettings,
+    openCharacterEditor:      charId => navigateToCharEditor(charId),
 
     showCharacterList,
     closeCharacterList:       () => closeModal('character-list-modal'),
@@ -1066,16 +848,6 @@ window.app = {
     exportCurrentChat:        handleExportChat,
     importChat:               handleImportChat,
 
-    previewCharacterAvatar(input) {
-        const file = input?.files?.[0];
-        if (!file) return;
-        _pendingAvatarBlob = file;
-        _showAvatarEditorPreview(URL.createObjectURL(file));
-    },
-    removeCharacterAvatar() {
-        _pendingAvatarBlob = false;
-        _showAvatarEditorPreview(null);
-    },
     openImageLightbox() {
         if (!currentCharacterAvatarUrl) return;
         const lb  = document.getElementById('image-lightbox');
@@ -1087,13 +859,8 @@ window.app = {
         if (lb) lb.style.display = 'none';
     },
 
-    scrollToTop() {
-        scrollToMessagesTop();
-    },
-    
-    scrollToBottom() {
-        scrollToMessagesBottom();
-    },
+    scrollToTop()    { scrollToMessagesTop(); },
+    scrollToBottom() { scrollToMessagesBottom(); },
 
     setChatFontSize(size) {
         const fs    = document.getElementById('chat-font-size');

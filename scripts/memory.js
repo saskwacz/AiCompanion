@@ -1,6 +1,9 @@
 import { dbGet, dbPut } from './db.js';
-import { callGeminiForMemory, embedContents, embedText } from './providers/gemini.js';
-import { buildMemorySeedPrompt, buildMemoryUpdatePrompt } from './providers/gemini-prompts.js';
+import {
+    callMemoryAPI, embedText as providerEmbedText, embedContents as providerEmbedContents,
+    buildMemoryUpdatePrompt as providerBuildMemoryUpdatePrompt,
+    buildMemorySeedPrompt   as providerBuildMemorySeedPrompt,
+} from './providers/index.js';
 
 export const MEMORY_SCHEMA_VERSION = 3;
 
@@ -204,19 +207,15 @@ function applyEmbeddings(mem, items, vectors) {
 }
 
 /** Embed all items missing vectors; returns updated memory (does not persist). */
-export async function ensureEmbeddings(mem, apiKey) {
+export async function ensureEmbeddings(mem, cfg) {
     const m       = normalizeMemory(mem);
     const needing = itemsNeedingEmbedding(m);
-    if (!needing.length || !apiKey) return m;
+    if (!needing.length || !cfg) return m;
 
     const vectors = [];
     for (let i = 0; i < needing.length; i += EMBED_BATCH_SIZE) {
-        const batch = needing.slice(i, i + EMBED_BATCH_SIZE);
-        const batchVecs = await embedContents({
-            apiKey,
-            texts:                batch.map(item => item.text),
-            outputDimensionality: EMBEDDING_DIM,
-        });
+        const batch     = needing.slice(i, i + EMBED_BATCH_SIZE);
+        const batchVecs = await providerEmbedContents(cfg, { texts: batch.map(item => item.text) });
         vectors.push(...batchVecs);
     }
 
@@ -287,22 +286,22 @@ function formatMemoryContext(items) {
 /**
  * Builds memory context for the system prompt using semantic search.
  * @param {object} mem
- * @param {{ query?: string, apiKey?: string|object[], topK?: number, minScore?: number }} opts
+ * @param {{ query?: string, cfg?: object, topK?: number, minScore?: number }} opts
  */
-export async function memoryToContext(mem, { query = '', apiKey, topK = MEMORY_TOP_K, minScore = MEMORY_MIN_SCORE } = {}) {
+export async function memoryToContext(mem, { query = '', cfg, topK = MEMORY_TOP_K, minScore = MEMORY_MIN_SCORE } = {}) {
     let m = normalizeMemory(mem);
     if (!flattenMemoryItems(m).length) return '';
 
-    if (apiKey) {
-        m = await ensureEmbeddings(m, apiKey);
+    if (cfg) {
+        m = await ensureEmbeddings(m, cfg);
     }
 
     const embedded = flattenMemoryItems(m).filter(i => i.embedding?.length);
     let selected;
 
-    if (query && apiKey && embedded.length) {
+    if (query && cfg && embedded.length) {
         try {
-            const queryEmb = await embedText({ apiKey, text: query, outputDimensionality: EMBEDDING_DIM });
+            const queryEmb = await providerEmbedText(cfg, { text: query });
             selected = searchMemoryItems(m, queryEmb, { topK, minScore });
             if (window.DEBUG_PROMPTS) {
                 console.groupCollapsed('[Memory] Semantic retrieval');
@@ -327,31 +326,143 @@ function norm(s) {
     return String(s).toLowerCase().replace(/[^\w\s]/g, '').trim();
 }
 
-function mergeItems(existingItems, newStrings, exchangeText = '', aiMsgSeqId = null) {
-    if (!newStrings.length) return normalizeItems(existingItems);
-    const exNorm     = norm(exchangeText);
-    const now        = Date.now();
-    const existing   = normalizeItems(existingItems);
+/** Build a memory object containing only the items whose IDs are in `ids`. */
+function filterMemoryToIds(mem, ids) {
+    const out = { ...mem };
+    for (const key of MEMORY_KEYS) {
+        out[key] = (mem[key] || []).filter(item => ids.has(item.id));
+    }
+    return out;
+}
 
-    return newStrings.map(text => {
-        const keywords    = norm(text).split(/\s+/).filter(w => w.length > 3);
-        const match       = existing.find(item => {
-            const eNorm = norm(item.text);
-            return keywords.some(w => eNorm.includes(w));
+/**
+ * Semantically select memory items to show in the update prompt.
+ *
+ * - Items WITHOUT embeddings → always included (need LLM exposure to become useful).
+ * - Items WITH embeddings → selected by cosine similarity ≥ 0.15, up to topK=30.
+ * - If no embedCfg or no embedded items → fall back to all items.
+ *
+ * Returns { promptMemory, selectedIds }:
+ *   promptMemory — filtered memory to pass to buildMemoryUpdatePrompt
+ *   selectedIds  — Set<id> of all items shown to the LLM (candidates for update/delete)
+ */
+async function selectForUpdatePrompt(existing, exchangeText, embedCfg) {
+    const allItems = flattenMemoryItems(existing);
+    if (!allItems.length) return { promptMemory: existing, selectedIds: new Set() };
+
+    const withEmb    = allItems.filter(i => i.embedding?.length);
+    const withoutEmb = allItems.filter(i => !i.embedding?.length);
+
+    // Items without embeddings always go into the prompt so the LLM can see and refine them
+    const alwaysIds = new Set(withoutEmb.map(i => i.id));
+
+    if (!embedCfg || !withEmb.length) {
+        // No semantic selection possible — show everything
+        const allIds = new Set(allItems.map(i => i.id));
+        return { promptMemory: existing, selectedIds: allIds };
+    }
+
+    try {
+        const queryEmb = await providerEmbedText(embedCfg, { text: exchangeText });
+        const scored = withEmb
+            .map(item => ({ ...item, score: cosineSimilarity(queryEmb, item.embedding) }))
+            .filter(i => i.score >= 0.15)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 30);
+
+        const selectedIds  = new Set([...scored.map(i => i.id), ...alwaysIds]);
+        const promptMemory = filterMemoryToIds(existing, selectedIds);
+        console.log(`[Memory] Update prompt: showing ${selectedIds.size}/${allItems.length} items (semantic + unembedded)`);
+        return { promptMemory, selectedIds };
+    } catch (e) {
+        console.warn('[Memory] Semantic selection for update prompt failed — using all items:', e.message);
+        const allIds = new Set(allItems.map(i => i.id));
+        return { promptMemory: existing, selectedIds: allIds };
+    }
+}
+
+/**
+ * Merge existing memory items with strings returned by the LLM.
+ *
+ * @param {object[]} existingItems  - current items for this section
+ * @param {string[]} newStrings     - strings returned by the LLM for this section
+ * @param {string}   exchangeText   - user + AI text (used for mention counting)
+ * @param {*}        aiMsgSeqId     - message seq id for new items
+ * @param {Set|null} selectedIds    - IDs of items that were shown to the LLM.
+ *   null  → keep-all mode (seeding): never delete, only add/update existing.
+ *   Set   → selective mode:
+ *             • item in selectedIds  + returned by LLM  → updated
+ *             • item in selectedIds  + NOT returned      → DELETED (LLM dropped it)
+ *             • item NOT in selectedIds                  → PRESERVED (LLM never saw it)
+ *             • new string not matching any existing     → ADDED
+ */
+function mergeItems(existingItems, newStrings, exchangeText = '', aiMsgSeqId = null, selectedIds = null) {
+    const exNorm   = norm(exchangeText);
+    const now      = Date.now();
+    const existing = normalizeItems(existingItems);
+    const newArr   = newStrings || [];
+
+    // Track which indices of newArr have been claimed by an existing item
+    const newMatched = new Set();
+
+    const result = [];
+    for (const item of existing) {
+        const isSelected = !selectedIds || selectedIds.has(item.id);
+
+        if (!isSelected) {
+            // LLM never saw this item — always preserve unchanged
+            result.push(item);
+            continue;
+        }
+
+        // Item was shown to LLM — find best matching new string (bidirectional keyword overlap)
+        const itemNorm = norm(item.text);
+        const itemKw   = itemNorm.split(/\s+/).filter(w => w.length > 3);
+
+        const matchIdx = newArr.findIndex((text, idx) => {
+            if (newMatched.has(idx)) return false;
+            const newNorm = norm(text);
+            const newKw   = newNorm.split(/\s+/).filter(w => w.length > 3);
+            return newKw.some(w => itemNorm.includes(w)) ||
+                   itemKw.some(w => newNorm.includes(w));
         });
-        const base        = match ? (match.count || 1) : 0;
-        const mentioned   = keywords.some(w => exNorm.includes(w));
-        const textChanged = match && norm(match.text) !== norm(text);
-        return {
-            id:             match?.id ?? crypto.randomUUID(),
+
+        if (matchIdx >= 0) {
+            newMatched.add(matchIdx);
+            const text        = newArr[matchIdx];
+            const textChanged = norm(item.text) !== norm(text);
+            const mentioned   = norm(text).split(/\s+/).filter(w => w.length > 3).some(w => exNorm.includes(w));
+            result.push({
+                id:             item.id,
+                text,
+                count:          (item.count || 1) + (mentioned ? 1 : 0),
+                firstSeen:      item.firstSeen ?? now,
+                createdAtMsgId: item.createdAtMsgId ?? aiMsgSeqId,
+                embedding:      textChanged ? null : (item.embedding ?? null),
+            });
+        } else if (!selectedIds) {
+            // keep-all / seeding mode: preserve items the LLM didn't explicitly return
+            result.push(item);
+        }
+        // selective mode + not returned → item intentionally dropped by LLM → skip
+    }
+
+    // Append new strings that didn't match any existing item
+    for (let idx = 0; idx < newArr.length; idx++) {
+        if (newMatched.has(idx)) continue;
+        const text      = newArr[idx];
+        const mentioned = norm(text).split(/\s+/).filter(w => w.length > 3).some(w => exNorm.includes(w));
+        result.push({
+            id:             crypto.randomUUID(),
             text,
-            count:          base + (mentioned ? 1 : 1),
-            firstSeen:      match?.firstSeen ?? now,
-            // preserve existing msgId if updating; stamp new msgId for new items
-            createdAtMsgId: match ? (match.createdAtMsgId ?? aiMsgSeqId) : aiMsgSeqId,
-            embedding:      (match && !textChanged) ? (match.embedding ?? null) : null,
-        };
-    });
+            count:          mentioned ? 2 : 1,
+            firstSeen:      now,
+            createdAtMsgId: aiMsgSeqId,
+            embedding:      null,
+        });
+    }
+
+    return result;
 }
 
 function toStr(arr) {
@@ -380,30 +491,27 @@ function parseMemoryResponse(raw) {
 }
 
 // ============ INTERNAL API CALL ============
-async function callMemoryModel(prompt, apiKey, maxOutputTokens = 4096, providerConfig = null, priority = 'normal') {
-    return callGeminiForMemory({
-        prompt,
-        apiKey:          providerConfig?.keys ?? apiKey,
-        maxOutputTokens,
-        priority:        providerConfig?.priority ?? priority,
-    });
+async function callMemoryModel(prompt, maxOutputTokens = 4096, cfg, priority = 'normal') {
+    return callMemoryAPI(cfg, { prompt, maxOutputTokens, priority });
 }
 
-async function persistWithEmbeddings(mem, apiKey) {
-    const withEmb = apiKey ? await ensureEmbeddings(mem, apiKey) : mem;
+async function persistWithEmbeddings(mem, embedCfg) {
+    const withEmb = embedCfg ? await ensureEmbeddings(mem, embedCfg) : mem;
     await saveMemory(withEmb);
     return withEmb;
 }
 
 // ============ UPDATE MEMORY AFTER EXCHANGE ============
-export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, character, recentMessages = [], maxOutputTokens = 8192, providerConfig = null, aiMsgSeqId = null) {
+export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, cfg, character, recentMessages = [], maxOutputTokens = 8192, aiMsgSeqId = null, embedCfg = null) {
     const existing     = normalizeMemory(await getMemoryForChat(chatId));
     const exchangeText = userMsg + ' ' + aiMsg;
-    const prompt       = buildMemoryUpdatePrompt(existing, character, recentMessages, userMsg, aiMsg);
-    const keys         = providerConfig?.keys ?? apiKey;
+
+    // Select which items to show in the update prompt (semantic search on existing embeddings)
+    const { promptMemory, selectedIds } = await selectForUpdatePrompt(existing, exchangeText, embedCfg);
+    const prompt = providerBuildMemoryUpdatePrompt(cfg, promptMemory, character, recentMessages, userMsg, aiMsg);
 
     try {
-        const raw  = await callMemoryModel(prompt, apiKey, maxOutputTokens, providerConfig, 'normal');
+        const raw  = await callMemoryModel(prompt, maxOutputTokens, cfg, 'normal');
         const flat = parseMemoryResponse(raw);
 
         console.log('[Memory] Parsed:', JSON.stringify({
@@ -411,7 +519,7 @@ export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, c
             charProfile: flat.charProfile?.length,
         }));
 
-        const mi = (key, ex) => mergeItems(ex || [], flat[key], exchangeText, aiMsgSeqId);
+        const mi = (key, ex) => mergeItems(ex || [], flat[key] || [], exchangeText, aiMsgSeqId, selectedIds);
         const updated = {
             ...existing,
             profile:      mi('profile',      existing.profile),
@@ -421,7 +529,7 @@ export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, c
             charGoals:    mi('charGoals',    existing.charGoals),
             charMemories: mi('charMemories', existing.charMemories),
         };
-        return await persistWithEmbeddings(updated, keys);
+        return await persistWithEmbeddings(updated, embedCfg || cfg);
     } catch (e) {
         console.warn('[Memory] Update failed:', e.message);
         return existing;
@@ -429,16 +537,15 @@ export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, apiKey, c
 }
 
 // ============ SEED / REFRESH FROM CHARACTER DEFINITION ============
-export async function seedMemoryFromCharacter(chatId, character, apiKey, existingMemory, maxOutputTokens = 8192, providerConfig = null) {
+export async function seedMemoryFromCharacter(chatId, character, cfg, existingMemory, maxOutputTokens = 8192, embedCfg = null) {
     const hasContent = character.characterDetails || character.scenario || character.prompt;
     if (!hasContent) return;
 
     const existing = normalizeMemory(existingMemory || await getMemoryForChat(chatId));
-    const prompt   = buildMemorySeedPrompt(character);
-    const keys     = providerConfig?.keys ?? apiKey;
+    const prompt   = providerBuildMemorySeedPrompt(cfg, character);
 
     try {
-        const raw  = await callMemoryModel(prompt, apiKey, maxOutputTokens, providerConfig, 'batch');
+        const raw  = await callMemoryModel(prompt, maxOutputTokens, cfg, 'batch');
         const flat = parseMemoryResponse(raw);
         const et   = [character.prompt, character.scenario,
                       character.characterDetails, character.dialogueExamples].filter(Boolean).join(' ');
@@ -453,7 +560,7 @@ export async function seedMemoryFromCharacter(chatId, character, apiKey, existin
             charGoals:    mi('charGoals',    existing.charGoals),
             charMemories: mi('charMemories', existing.charMemories),
         };
-        return await persistWithEmbeddings(seeded, keys);
+        return await persistWithEmbeddings(seeded, embedCfg || cfg);
     } catch (e) {
         console.warn('[Memory] Seed failed:', e.message);
     }

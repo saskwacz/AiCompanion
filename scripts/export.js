@@ -43,10 +43,17 @@ export async function exportChat(chatId) {
     const avatarBase64 = await blobToBase64(avatarBlob);
 
     const data = {
-        version:    3,
+        version:    4,
         exportedAt: new Date().toISOString(),
         character:  { ...character, id: undefined, avatarBase64 },
-        chat:       { ...chat,      id: undefined, characterId: undefined },
+        chat:       {
+            ...chat,
+            id:          undefined,
+            characterId: undefined,
+            // Strip API keys from exported config — security: keys should not travel in plain JSON files.
+            // The recipient can sync keys from their own global settings after import.
+            config: chat.config ? { ...chat.config, apiKeys: [] } : null,
+        },
         messages:   messages.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp })),
         memory:     memoryForExport(memory),
         summary: summary
@@ -99,8 +106,11 @@ export function importChatFromFile(file) {
                     }
                 }
 
-                // Re-create chat
-                const chat = await createChat(character.id);
+                // Re-create chat (pass config from export; strip any stale keys)
+                const importedConfig = data.chat?.config
+                    ? { ...data.chat.config, apiKeys: [] }
+                    : null;
+                const chat = await createChat(character.id, importedConfig);
                 await updateChat(chat.id, {
                     title:           data.chat?.title  || 'Imported Chat',
                     messageCount:    data.messages.length,

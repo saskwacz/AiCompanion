@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <meta name="theme-color" content="#0f172a">
+    <title>Edycja postaci — AiComp</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="subpage-body">
+
+<div id="toast-container"></div>
+
+<div class="subpage-layout">
+
+    <!-- Header -->
+    <header class="subpage-header">
+        <button class="back-btn" onclick="goBack()">&#8592; Powrót</button>
+        <h1 class="subpage-title" id="page-title">Nowa postać</h1>
+        <button class="btn-primary" onclick="saveCharacter()">Zapisz</button>
+    </header>
+
+    <!-- Content -->
+    <div class="subpage-content subpage-content--wide">
+        <div class="char-editor-layout">
+
+            <!-- Left aside: avatar + name + delete -->
+            <aside class="char-editor-aside">
+                <div class="char-avatar-editor" id="char-avatar-editor">
+                    <span id="char-avatar-placeholder">?</span>
+                    <img id="char-avatar-img" style="display:none" alt="Avatar">
+                </div>
+                <div class="char-avatar-actions">
+                    <button class="btn-secondary small" onclick="document.getElementById('char-avatar-input').click()">
+                        &#128247; Wybierz zdjęcie
+                    </button>
+                    <button class="btn-secondary small" id="char-avatar-remove" onclick="removeAvatar()" style="display:none">
+                        &#10005; Usuń zdjęcie
+                    </button>
+                </div>
+                <input type="file" id="char-avatar-input" accept="image/*" style="display:none"
+                       onchange="previewAvatar(this)">
+
+                <div class="field-group">
+                    <label for="char-name">Nazwa *</label>
+                    <input type="text" id="char-name" class="setting-input" placeholder="Imię / nazwa postaci">
+                </div>
+
+                <div id="aside-delete" style="display:none; margin-top: 12px;">
+                    <button class="btn-danger" style="width:100%" onclick="deleteCharacter()">
+                        &#128465; Usuń postać
+                    </button>
+                </div>
+            </aside>
+
+            <!-- Right: text fields -->
+            <main class="char-editor-main">
+
+                <div class="field-group">
+                    <label for="char-prompt">Character Prompt <span class="required">*</span></label>
+                    <small class="field-hint">Opisz osobowość, charakter i sposób zachowania postaci. To jest główna definicja AI.</small>
+                    <textarea id="char-prompt" class="setting-input editor-textarea" rows="14"
+                        placeholder="You are [imię], a [opis]... Describe core personality, tone, behavior, quirks."></textarea>
+                </div>
+
+                <div class="field-group">
+                    <label for="char-welcome">Wiadomość powitalna</label>
+                    <small class="field-hint">Co postać mówi na początku każdego nowego czatu.</small>
+                    <textarea id="char-welcome" class="setting-input editor-textarea" rows="8"
+                        placeholder="Cześć! Jak mogę ci pomóc?"></textarea>
+                </div>
+
+                <div class="field-group">
+                    <label for="char-scenario">Scenariusz</label>
+                    <small class="field-hint">Opis miejsca, sytuacji lub kontekstu fabularnego.</small>
+                    <textarea id="char-scenario" class="setting-input editor-textarea" rows="10"
+                        placeholder="Jesteś w [miejsce/sytuacja]. Czas akcji: [kiedy]..."></textarea>
+                </div>
+
+                <div class="field-group">
+                    <label for="char-details">Szczegółowy opis postaci</label>
+                    <small class="field-hint">Wygląd, historia, umiejętności, motywacje. Ten tekst jest też importowany do pamięci AI.</small>
+                    <textarea id="char-details" class="setting-input editor-textarea" rows="20"
+                        placeholder="Wygląd: ...&#10;Historia: ...&#10;Umiejętności: ...&#10;Motywacje: ..."></textarea>
+                </div>
+
+                <div class="field-group">
+                    <label for="char-dialogue">Przykłady dialogów</label>
+                    <small class="field-hint">Przykłady jak postać powinna odpowiadać — formatuj jako User: … / Postać: …</small>
+                    <textarea id="char-dialogue" class="setting-input editor-textarea" rows="16"
+                        placeholder="User: Hej!&#10;[Imię]: Witaj! Jak mogę ci dziś pomóc?&#10;&#10;User: Opowiedz mi o sobie.&#10;[Imię]: ..."></textarea>
+                </div>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="subpage-footer">
+        <div class="footer-left" id="footer-delete-wrap" style="display:none">
+            <button class="btn-danger" onclick="deleteCharacter()">&#128465; Usuń postać</button>
+        </div>
+        <div class="footer-right">
+            <button class="btn-secondary" onclick="goBack()">Anuluj</button>
+            <button class="btn-primary"   onclick="saveCharacter()">Zapisz postać</button>
+        </div>
+    </footer>
+
+</div>
+
+<script type="module" src="scripts/character-editor.js"></script>
+</body>
+</html>

@@ -25,7 +25,7 @@ export function parseMessageMarkup(text) {
 }
 
 // ============ TOAST NOTIFICATIONS ============
-export function showToast(message, type = 'info') {
+export function showToast(message, type = 'info', duration = 3500) {
     const container = document.getElementById('toast-container');
     if (!container) return;
 
@@ -40,7 +40,7 @@ export function showToast(message, type = 'info') {
     setTimeout(() => {
         el.classList.remove('visible');
         setTimeout(() => el.remove(), 350);
-    }, 3500);
+    }, duration);
 }
 
 // ============ TIMESTAMP FORMATTER ============

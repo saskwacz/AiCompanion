@@ -1,6 +1,6 @@
 import { dbAdd, dbGet, dbPut, dbDelete, dbGetAll } from './db.js';
 
-export async function createChat(characterId) {
+export async function createChat(characterId, config = null) {
     const now  = Date.now();
     const chat = {
         characterId,
@@ -10,6 +10,7 @@ export async function createChat(characterId) {
         messageCount:    0,
         lastMessage:     null,
         lastMessageTime: null,
+        config:          config || null,
     };
     const id = await dbAdd('chats', chat);
     return { ...chat, id };

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <meta name="theme-color" content="#0f172a">
+    <title>Ustawienia czatu — AiComp</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="subpage-body">
+
+<div id="toast-container"></div>
+
+<div class="subpage-layout">
+
+    <!-- Header -->
+    <header class="subpage-header">
+        <button class="back-btn" onclick="goBack()">&#8592; Powrót</button>
+        <h1 class="subpage-title">Ustawienia czatu</h1>
+        <button class="btn-primary" onclick="saveSettings()">Zapisz</button>
+    </header>
+
+    <!-- ──────────────── OUTER TABS ──────────────── -->
+    <div class="cs-outer-tabs" role="tablist">
+        <button class="cs-outer-tab active" data-tab="general"  onclick="switchTab(this,'general')">&#9881;&#65039; Ogólne</button>
+        <button class="cs-outer-tab"        data-tab="gemini"   onclick="switchTab(this,'gemini')">&#128171; Gemini</button>
+        <button class="cs-outer-tab"        data-tab="ollama"   onclick="switchTab(this,'ollama')">&#129302; Ollama</button>
+    </div>
+
+    <div class="subpage-content cs-content">
+
+        <!-- ══════════════ GENERAL TAB ══════════════ -->
+        <div class="cs-outer-panel active" id="cs-panel-general">
+
+            <div class="cs-section-header">&#128260; Szybki wybór dostawcy</div>
+            <div class="setting-group provider-quick-switch">
+                <label>Ustaw wszystkich na:</label>
+                <div class="provider-quick-btns">
+                    <button class="btn-secondary small" onclick="setAllProviders('gemini')">Gemini</button>
+                    <button class="btn-secondary small" onclick="setAllProviders('ollama')">Ollama (local)</button>
+                </div>
+            </div>
+
+            <!-- Chat task -->
+            <div class="cs-section-header">&#128172; Chat</div>
+            <div class="setting-group">
+                <div class="cs-two-col">
+                    <div>
+                        <label for="g-chat-provider">Dostawca</label>
+                        <select id="g-chat-provider" class="setting-input" onchange="onProviderChange('chat')">
+                            <option value="gemini">Gemini</option>
+                            <option value="ollama">Ollama (local)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="g-chat-temp">Temperature: <span id="g-chat-temp-val">0.7</span></label>
+                        <input type="range" id="g-chat-temp" class="slider" min="0" max="2" step="0.05" value="0.7"
+                               oninput="document.getElementById('g-chat-temp-val').textContent = (+this.value).toFixed(2)">
+                    </div>
+                </div>
+                <div class="cs-two-col" style="margin-top:12px">
+                    <div>
+                        <label for="g-chat-max-tokens">Max Output Tokens</label>
+                        <input type="number" id="g-chat-max-tokens" class="setting-input" value="8192" min="256" max="65536" step="256">
+                        <div class="quick-buttons">
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-max-tokens').value=2048">2K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-max-tokens').value=4096">4K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-max-tokens').value=8192">8K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-max-tokens').value=16384">16K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-max-tokens').value=65536">Max</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="g-chat-ctx">Context Tokens (historia)</label>
+                        <input type="number" id="g-chat-ctx" class="setting-input" value="8000" min="1000" max="1000000" step="1000">
+                        <div class="quick-buttons">
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-ctx').value=4000">4K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-ctx').value=16000">16K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-ctx').value=32000">32K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-ctx').value=100000">100K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-chat-ctx').value=1000000">Max</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Memory task -->
+            <div class="cs-section-header">&#129504; Memory</div>
+            <div class="setting-group">
+                <div class="cs-two-col">
+                    <div>
+                        <label for="g-memory-provider">Dostawca</label>
+                        <select id="g-memory-provider" class="setting-input" onchange="onProviderChange('memory')">
+                            <option value="gemini">Gemini</option>
+                            <option value="ollama">Ollama (local)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="g-memory-temp">Temperature: <span id="g-memory-temp-val">0.1</span></label>
+                        <input type="range" id="g-memory-temp" class="slider" min="0" max="1" step="0.05" value="0.1"
+                               oninput="document.getElementById('g-memory-temp-val').textContent = (+this.value).toFixed(2)">
+                    </div>
+                </div>
+                <div style="margin-top:12px">
+                    <label for="g-memory-max-tokens">Max Output Tokens</label>
+                    <input type="number" id="g-memory-max-tokens" class="setting-input" value="8192" min="512" max="65536" step="512">
+                    <div class="quick-buttons">
+                        <button class="quick-btn" onclick="document.getElementById('g-memory-max-tokens').value=4096">4K</button>
+                        <button class="quick-btn" onclick="document.getElementById('g-memory-max-tokens').value=8192">8K</button>
+                        <button class="quick-btn" onclick="document.getElementById('g-memory-max-tokens').value=16384">16K</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Summary task -->
+            <div class="cs-section-header">&#128203; Summary</div>
+            <div class="setting-group">
+                <div class="cs-two-col">
+                    <div>
+                        <label for="g-summary-provider">Dostawca</label>
+                        <select id="g-summary-provider" class="setting-input" onchange="onProviderChange('summary')">
+                            <option value="gemini">Gemini</option>
+                            <option value="ollama">Ollama (local)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="g-summary-temp">Temperature: <span id="g-summary-temp-val">0.3</span></label>
+                        <input type="range" id="g-summary-temp" class="slider" min="0" max="1" step="0.05" value="0.3"
+                               oninput="document.getElementById('g-summary-temp-val').textContent = (+this.value).toFixed(2)">
+                    </div>
+                </div>
+                <div class="cs-two-col" style="margin-top:12px">
+                    <div>
+                        <label for="g-summary-max-tokens">Max Output Tokens</label>
+                        <input type="number" id="g-summary-max-tokens" class="setting-input" value="8192" min="512" max="65536" step="512">
+                        <div class="quick-buttons">
+                            <button class="quick-btn" onclick="document.getElementById('g-summary-max-tokens').value=4096">4K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-summary-max-tokens').value=8192">8K</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-summary-max-tokens').value=16384">16K</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="g-summary-every">Auto-summary co ile odpowiedzi</label>
+                        <input type="number" id="g-summary-every" class="setting-input" value="10" min="1" max="200" step="1">
+                        <div class="quick-buttons">
+                            <button class="quick-btn" onclick="document.getElementById('g-summary-every').value=5">5</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-summary-every').value=10">10</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-summary-every').value=20">20</button>
+                            <button class="quick-btn" onclick="document.getElementById('g-summary-every').value=50">50</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Embed task -->
+            <div class="cs-section-header">&#128202; Embeddings</div>
+            <div class="setting-group">
+                <label for="g-embed-provider">Dostawca</label>
+                <select id="g-embed-provider" class="setting-input" onchange="onProviderChange('embed')">
+                    <option value="gemini">Gemini</option>
+                    <option value="ollama">Ollama (local)</option>
+                </select>
+            </div>
+
+            <!-- Language -->
+            <div class="cs-section-header">&#127760; Język komunikacji</div>
+            <div class="setting-group">
+                <label for="g-chat-lang">Język czatu (wpływa na pamięć, podsumowania i instrukcje systemowe)</label>
+                <select id="g-chat-lang" class="setting-input">
+                    <option value="pl">&#127477;&#127473; Polski</option>
+                    <option value="en">&#127468;&#127463; English</option>
+                </select>
+                <small style="color:var(--text-secondary);margin-top:6px;display:block">
+                    Model AI będzie pisać pamięć i podsumowania w wybranym języku oraz dostanie instrukcję systemową w tym języku.
+                    Zmiana języka dotyczy TEGO czatu — nowe czaty dziedziczą ustawienie domyślne (pl).
+                </small>
+            </div>
+
+        </div><!-- /general panel -->
+
+        <!-- ══════════════ GEMINI TAB ══════════════ -->
+        <div class="cs-outer-panel" id="cs-panel-gemini">
+
+            <!-- Inner tabs -->
+            <div class="cs-inner-tabs" role="tablist">
+                <button class="cs-inner-tab active" data-inner="gemini-general" onclick="switchInnerTab(this,'gemini-general')">Ogólne</button>
+                <button class="cs-inner-tab"        data-inner="gemini-chat"    onclick="switchInnerTab(this,'gemini-chat')">Chat</button>
+                <button class="cs-inner-tab"        data-inner="gemini-memory"  onclick="switchInnerTab(this,'gemini-memory')">Memory</button>
+                <button class="cs-inner-tab"        data-inner="gemini-summary" onclick="switchInnerTab(this,'gemini-summary')">Summary</button>
+                <button class="cs-inner-tab"        data-inner="gemini-embed"   onclick="switchInnerTab(this,'gemini-embed')">Embeddings</button>
+            </div>
+
+            <!-- Gemini > Ogólne -->
+            <div class="cs-inner-panel active" id="cs-inner-gemini-general">
+                <div class="setting-group">
+                    <label>Klucze API Gemini (tego czatu)</label>
+                    <div id="g-api-keys-list" class="api-keys-list"></div>
+                    <div class="api-key-form">
+                        <input type="text"     id="g-new-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                        <input type="password" id="g-new-key-value" class="setting-input" placeholder="Wklej klucz API...">
+                        <button class="btn-secondary" onclick="addApiKey()">Dodaj</button>
+                    </div>
+                    <button class="btn-secondary small" onclick="syncApiKeysFromGlobal()" style="margin-top:8px">
+                        &#8595; Kopiuj z globalnych
+                    </button>
+                    <small style="display:block;margin-top:6px;color:var(--text-secondary)">
+                        Klucze rotują losowo. Przypisane tylko do tego czatu.
+                    </small>
+                </div>
+            </div>
+
+            <!-- Gemini > Chat model -->
+            <div class="cs-inner-panel" id="cs-inner-gemini-chat">
+                <div class="setting-group">
+                    <label for="g-gemini-chat-model">Model Gemini dla czatu</label>
+                    <select id="g-gemini-chat-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID modelu:</span>
+                        <input type="text" id="g-gemini-chat-model-custom" class="setting-input" placeholder="gemini-3.5-flash"
+                               oninput="syncCustomModel(this,'g-gemini-chat-model')">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gemini > Memory model -->
+            <div class="cs-inner-panel" id="cs-inner-gemini-memory">
+                <div class="setting-group">
+                    <label for="g-gemini-memory-model">Model Gemini dla memory</label>
+                    <select id="g-gemini-memory-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-gemini-memory-model-custom" class="setting-input" placeholder="gemini-3.0-flash"
+                               oninput="syncCustomModel(this,'g-gemini-memory-model')">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gemini > Summary model -->
+            <div class="cs-inner-panel" id="cs-inner-gemini-summary">
+                <div class="setting-group">
+                    <label for="g-gemini-summary-model">Model Gemini dla summary</label>
+                    <select id="g-gemini-summary-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-gemini-summary-model-custom" class="setting-input" placeholder="gemini-3.1-flash-lite"
+                               oninput="syncCustomModel(this,'g-gemini-summary-model')">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gemini > Embeddings model -->
+            <div class="cs-inner-panel" id="cs-inner-gemini-embed">
+                <div class="setting-group">
+                    <label for="g-gemini-embed-model">Model Gemini dla embeddings</label>
+                    <select id="g-gemini-embed-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-gemini-embed-model-custom" class="setting-input" placeholder="gemini-embedding-2"
+                               oninput="syncCustomModel(this,'g-gemini-embed-model')">
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /gemini panel -->
+
+        <!-- ══════════════ OLLAMA TAB ══════════════ -->
+        <div class="cs-outer-panel" id="cs-panel-ollama">
+
+            <!-- Inner tabs -->
+            <div class="cs-inner-tabs" role="tablist">
+                <button class="cs-inner-tab active" data-inner="ollama-general" onclick="switchInnerTab(this,'ollama-general')">Ogólne</button>
+                <button class="cs-inner-tab"        data-inner="ollama-chat"    onclick="switchInnerTab(this,'ollama-chat')">Chat</button>
+                <button class="cs-inner-tab"        data-inner="ollama-memory"  onclick="switchInnerTab(this,'ollama-memory')">Memory</button>
+                <button class="cs-inner-tab"        data-inner="ollama-summary" onclick="switchInnerTab(this,'ollama-summary')">Summary</button>
+                <button class="cs-inner-tab"        data-inner="ollama-embed"   onclick="switchInnerTab(this,'ollama-embed')">Embeddings</button>
+            </div>
+
+            <!-- Ollama > Ogólne -->
+            <div class="cs-inner-panel active" id="cs-inner-ollama-general">
+                <div class="setting-group">
+                    <label for="g-ollama-url">URL serwera Ollama</label>
+                    <input type="text" id="g-ollama-url" class="setting-input" placeholder="http://localhost:11434">
+                    <small style="color:var(--text-secondary)">Domyślnie: http://localhost:11434</small>
+                </div>
+            </div>
+
+            <!-- Ollama > Chat model -->
+            <div class="cs-inner-panel" id="cs-inner-ollama-chat">
+                <div class="setting-group">
+                    <label for="g-ollama-chat-model">Model Ollama dla czatu</label>
+                    <input type="text" id="g-ollama-chat-model" class="setting-input"
+                           placeholder="llama3.1:8b" list="dl-ollama-chat">
+                    <datalist id="dl-ollama-chat"></datalist>
+                    <small style="color:var(--text-secondary)">Wpisz dokładną nazwę modelu zainstalowanego w Ollama.</small>
+                </div>
+            </div>
+
+            <!-- Ollama > Memory model -->
+            <div class="cs-inner-panel" id="cs-inner-ollama-memory">
+                <div class="setting-group">
+                    <label for="g-ollama-memory-model">Model Ollama dla memory</label>
+                    <input type="text" id="g-ollama-memory-model" class="setting-input"
+                           placeholder="qwen3:8b" list="dl-ollama-memory">
+                    <datalist id="dl-ollama-memory"></datalist>
+                </div>
+            </div>
+
+            <!-- Ollama > Summary model -->
+            <div class="cs-inner-panel" id="cs-inner-ollama-summary">
+                <div class="setting-group">
+                    <label for="g-ollama-summary-model">Model Ollama dla summary</label>
+                    <input type="text" id="g-ollama-summary-model" class="setting-input"
+                           placeholder="phi3:mini" list="dl-ollama-summary">
+                    <datalist id="dl-ollama-summary"></datalist>
+                </div>
+            </div>
+
+            <!-- Ollama > Embeddings model -->
+            <div class="cs-inner-panel" id="cs-inner-ollama-embed">
+                <div class="setting-group">
+                    <label for="g-ollama-embed-model">Model Ollama dla embeddings</label>
+                    <input type="text" id="g-ollama-embed-model" class="setting-input"
+                           placeholder="jeffh/intfloat-multilingual-e5-small:q8_0" list="dl-ollama-embed">
+                    <datalist id="dl-ollama-embed"></datalist>
+                </div>
+            </div>
+
+        </div><!-- /ollama panel -->
+
+    </div><!-- /subpage-content -->
+
+    <!-- Footer -->
+    <footer class="subpage-footer">
+        <button class="btn-secondary" onclick="goBack()">Anuluj</button>
+        <button class="btn-primary"   onclick="saveSettings()">Zapisz ustawienia</button>
+    </footer>
+
+</div>
+
+<script type="module" src="scripts/chat-settings-page.js"></script>
+</body>
+</html>
