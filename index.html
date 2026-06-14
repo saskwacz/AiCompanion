@@ -59,6 +59,7 @@
     <main class="main-content">
 
         <div class="chat-header">
+            <button class="menu-btn" id="menu-btn" onclick="app.toggleSidebar()" aria-label="Menu">&#9776;</button>
             <div class="chat-header-buttons">
                 <button class="hdr-btn" onclick="app.toggleMemoryPanel()" title="View companion memory">&#129504; Memory</button>
                 <button class="hdr-btn" onclick="app.generateSummary()"   title="Generate summary">&#128203; Summary</button>
@@ -116,6 +117,9 @@
 
 <!-- OVERLAY -->
 <div class="overlay" id="overlay" onclick="app.closeModals()"></div>
+
+<!-- SIDEBAR BACKDROP (mobile only) -->
+<div class="sidebar-backdrop" id="sidebar-backdrop" onclick="app.closeSidebar()"></div>
 
 <!-- SETTINGS MODAL (global — only API keys + UI prefs) -->
 <div class="modal" id="settings-modal">

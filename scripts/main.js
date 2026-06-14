@@ -266,6 +266,10 @@ async function selectChat(chatId) {
     });
 
     document.getElementById('message-input')?.focus();
+
+    /* Close mobile sidebar after selecting a chat */
+    document.querySelector('.sidebar')?.classList.remove('sidebar-open');
+    document.getElementById('sidebar-backdrop')?.classList.remove('active');
 }
 
 async function deleteChatConfirm(chatId) {
@@ -876,6 +880,17 @@ window.app = {
     dismissRetry: () => { lastFailedMessage = null; hideRetryBar(); },
 
     closeModals: closeAllModals,
+
+    toggleSidebar() {
+        const sidebar  = document.querySelector('.sidebar');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        const open = sidebar?.classList.toggle('sidebar-open');
+        backdrop?.classList.toggle('active', !!open);
+    },
+    closeSidebar() {
+        document.querySelector('.sidebar')?.classList.remove('sidebar-open');
+        document.getElementById('sidebar-backdrop')?.classList.remove('active');
+    },
 };
 
 // ── Boot ──
