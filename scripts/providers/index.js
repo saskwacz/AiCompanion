@@ -68,11 +68,11 @@ import {
 const PROVIDERS = {
 
     gemini: {
-        callChat: ({ messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, keys, model }) =>
-            callGeminiAPI({ apiKey: keys, messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, chatModel: model }),
+        callChat: ({ messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, keys, model, modelFallback }) =>
+            callGeminiAPI({ apiKey: keys, messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, chatModel: model, chatModelFallback: modelFallback }),
 
-        callMemory: ({ prompt, maxOutputTokens, keys, priority, model }) =>
-            callGeminiForMemory({ prompt, apiKey: keys, maxOutputTokens, priority, memoryModel: model }),
+        callMemory: ({ prompt, maxOutputTokens, keys, priority, model, modelFallback }) =>
+            callGeminiForMemory({ prompt, apiKey: keys, maxOutputTokens, priority, memoryModel: model, memoryModelFallback: modelFallback }),
 
         callSummary: ({ prompt, maxOutputTokens, keys, model }) =>
             callGeminiForSummary({ prompt, apiKey: keys, maxOutputTokens, summaryModel: model }),
@@ -133,18 +133,20 @@ function getProvider(name) {
 export function callChatAPI(cfg, { messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens }) {
     return getProvider(cfg.provider).callChat({
         messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens,
-        keys:      cfg.keys,
-        ollamaUrl: cfg.ollamaUrl,
-        model:     cfg.model ?? null,
+        keys:          cfg.keys,
+        ollamaUrl:     cfg.ollamaUrl,
+        model:         cfg.model ?? null,
+        modelFallback: cfg.modelFallback ?? null,
     });
 }
 
 export function callMemoryAPI(cfg, { prompt, maxOutputTokens, priority = 'normal' }) {
     return getProvider(cfg.provider).callMemory({
         prompt, maxOutputTokens, priority,
-        keys:      cfg.keys,
-        ollamaUrl: cfg.ollamaUrl,
-        model:     cfg.model ?? null,
+        keys:          cfg.keys,
+        ollamaUrl:     cfg.ollamaUrl,
+        model:         cfg.model ?? null,
+        modelFallback: cfg.modelFallback ?? null,
     });
 }
 

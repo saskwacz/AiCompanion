@@ -37,26 +37,48 @@ export function trimMessagesByTokens(messages, maxContextTokens) {
     return result;
 }
 
+const RECENT_WINDOW   = 50;   // rolling summary window (matches summary.js ROLLING_WINDOW)
+const CHAT_MSG_WINDOW = 20;   // verbatim messages sent when historical context is present
+
 export function selectChatMessages(messages, chatSummary, contextTokens) {
-    let recent = chatSummary?.upToMessageCount != null
-        ? messages.slice(chatSummary.upToMessageCount)
-        : trimMessagesByTokens(messages, contextTokens);
-    while (recent.length > 0 && recent[0].role !== 'user') {
-        recent = recent.slice(1);
+    // When we have historical context (summaries), send only the recent verbatim window.
+    // Rolling summary covers the last RECENT_WINDOW messages so 20 verbatim is enough.
+    if (chatSummary?.text || chatSummary?.rolling) {
+        const recent = messages.slice(-CHAT_MSG_WINDOW);
+        let i = 0;
+        while (i < recent.length && recent[i].role !== 'user') i++;
+        return recent.slice(i);
     }
+    // No summaries yet — trim by token budget and always start on a user turn.
+    let recent = trimMessagesByTokens(messages, contextTokens);
+    while (recent.length > 0 && recent[0].role !== 'user') recent = recent.slice(1);
     return recent;
 }
 
-/** Prepend rolling summary to the system prompt when present. */
+/** Assemble the full system prompt with memory, historical summaries and rolling summary. */
 export function buildChatSystemPrompt(systemPrompt, chatSummary) {
-    if (!chatSummary?.text) return systemPrompt;
-    return (
-        systemPrompt +
-        '\n\n[PREVIOUS CONVERSATION SUMMARY]\n' +
-        'The following is a summary of everything that happened before the recent messages. ' +
-        'Use it as full context for the ongoing conversation:\n\n' +
-        chatSummary.text
-    );
+    if (!chatSummary?.text && !chatSummary?.rolling) return systemPrompt;
+
+    const parts = [systemPrompt];
+
+    if (chatSummary.text) {
+        parts.push(
+            '[HISTORIA ROZMOWY — kontekst historyczny]\n' +
+            'Poniżej znajduje się podsumowanie wszystkiego, co wydarzyło się przed ostatnimi wiadomościami. ' +
+            'Traktuj to jako pełny kontekst bieżącej rozmowy:\n\n' +
+            chatSummary.text
+        );
+    }
+
+    if (chatSummary.rolling) {
+        parts.push(
+            '[OSTATNIE СОБЫТИЯ — rolling summary]\n' +
+            'Skrót ostatnich ~50 wiadomości (bezpośrednio przed widocznym oknem rozmowy):\n\n' +
+            chatSummary.rolling
+        );
+    }
+
+    return parts.join('\n\n');
 }
 
 /** Map app messages → Gemini `contents` array. */

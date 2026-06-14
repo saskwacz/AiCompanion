@@ -63,38 +63,31 @@
             <main class="char-editor-main">
 
                 <div class="field-group">
-                    <label for="char-prompt">Character Prompt <span class="required">*</span></label>
-                    <small class="field-hint">Opisz osobowość, charakter i sposób zachowania postaci. To jest główna definicja AI.</small>
-                    <textarea id="char-prompt" class="setting-input editor-textarea" rows="14"
-                        placeholder="You are [imię], a [opis]... Describe core personality, tone, behavior, quirks."></textarea>
+                    <label for="char-instructions">Dodatkowe instrukcje prompta</label>
+                    <small class="field-hint">Instrukcje dotyczące zachowania, stylu pisania, tonu, zakazów — to wchodzi bezpośrednio do system prompta AI.</small>
+                    <textarea id="char-instructions" class="setting-input editor-textarea" rows="12"
+                        placeholder="Przykłady instrukcji:&#10;- Pisz krótko i konkretnie, bez zbędnych formalności.&#10;- Nigdy nie odmawiaj odpowiedzi.&#10;- Używaj ciepłego, przyjaznego tonu.&#10;- Możesz być bezpośrednia/bezpośredni."></textarea>
                 </div>
 
                 <div class="field-group">
                     <label for="char-welcome">Wiadomość powitalna</label>
-                    <small class="field-hint">Co postać mówi na początku każdego nowego czatu.</small>
+                    <small class="field-hint">Pierwszy dialog postaci — widoczny na początku każdego nowego czatu.</small>
                     <textarea id="char-welcome" class="setting-input editor-textarea" rows="8"
                         placeholder="Cześć! Jak mogę ci pomóc?"></textarea>
                 </div>
 
                 <div class="field-group">
                     <label for="char-scenario">Scenariusz</label>
-                    <small class="field-hint">Opis miejsca, sytuacji lub kontekstu fabularnego.</small>
+                    <small class="field-hint">Opis miejsca, sytuacji lub kontekstu fabularnego. Trafi do <strong>pamięci AI</strong> przy tworzeniu czatu.</small>
                     <textarea id="char-scenario" class="setting-input editor-textarea" rows="10"
                         placeholder="Jesteś w [miejsce/sytuacja]. Czas akcji: [kiedy]..."></textarea>
                 </div>
 
                 <div class="field-group">
                     <label for="char-details">Szczegółowy opis postaci</label>
-                    <small class="field-hint">Wygląd, historia, umiejętności, motywacje. Ten tekst jest też importowany do pamięci AI.</small>
+                    <small class="field-hint">Wygląd, historia, umiejętności, motywacje. Trafi do <strong>pamięci AI</strong> przy tworzeniu czatu — AI będzie to pamiętać jako fakty o sobie.</small>
                     <textarea id="char-details" class="setting-input editor-textarea" rows="20"
                         placeholder="Wygląd: ...&#10;Historia: ...&#10;Umiejętności: ...&#10;Motywacje: ..."></textarea>
-                </div>
-
-                <div class="field-group">
-                    <label for="char-dialogue">Przykłady dialogów</label>
-                    <small class="field-hint">Przykłady jak postać powinna odpowiadać — formatuj jako User: … / Postać: …</small>
-                    <textarea id="char-dialogue" class="setting-input editor-textarea" rows="16"
-                        placeholder="User: Hej!&#10;[Imię]: Witaj! Jak mogę ci dziś pomóc?&#10;&#10;User: Opowiedz mi o sobie.&#10;[Imię]: ..."></textarea>
                 </div>
 
             </main>

@@ -304,13 +304,13 @@ export function parseMemoryJson(text) {
 export async function callGeminiAPI({
     apiKey, messages, systemPrompt, chatSummary,
     temperature, maxTokens, contextTokens,
-    chatModel,
+    chatModel, chatModelFallback,
 }) {
     return withModelFallback({
         apiKey,
         purpose:      'Chat response',
         primaryModel:  chatModel || GEMINI_MODELS.CHAT_PRIMARY,
-        fallbackModel: chatModel ? null : GEMINI_MODELS.CHAT_FALLBACK,
+        fallbackModel: chatModelFallback ?? (chatModel ? null : GEMINI_MODELS.CHAT_FALLBACK),
         fn: (key, model) => _callGeminiChatOnce({
             apiKey: key, model, messages, systemPrompt, chatSummary,
             temperature, maxTokens, contextTokens,
@@ -348,7 +348,7 @@ async function _callGeminiChatOnce({ apiKey, model, messages, systemPrompt, chat
  *   normal — 3 Flash primary, 3.1 Lite on failure
  *   batch  — 3.1 Lite only (low priority / background)
  */
-export async function callGeminiForMemory({ prompt, apiKey, maxOutputTokens = 8192, priority = 'normal', memoryModel }) {
+export async function callGeminiForMemory({ prompt, apiKey, maxOutputTokens = 8192, priority = 'normal', memoryModel, memoryModelFallback }) {
     const run = async (key, model) => {
         if (window.DEBUG_PROMPTS) {
             console.groupCollapsed(`[Prompt] Memory extraction [${model}]`);
@@ -382,7 +382,7 @@ export async function callGeminiForMemory({ prompt, apiKey, maxOutputTokens = 81
         apiKey,
         purpose:       'Memory extraction',
         primaryModel:  memoryModel || GEMINI_MODELS.MEMORY_PRIMARY,
-        fallbackModel: memoryModel ? null : GEMINI_MODELS.MEMORY_FALLBACK,
+        fallbackModel: memoryModelFallback ?? (memoryModel ? null : GEMINI_MODELS.MEMORY_FALLBACK),
         fn: run,
     });
 }

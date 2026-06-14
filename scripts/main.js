@@ -7,11 +7,16 @@ import { createChat, updateChat, deleteChatById,
          getChatById, getChatsForCharacter }                            from './chats.js';
 import { addMessage, getMessagesForChat, deleteMessageById,
          deleteMessagesFrom, deleteAllForChat }                         from './messages.js';
-import { getMemoryForChat, updateMemoryFromExchange,
+import { getMemoryForChat, computeMemoryUpdate, persistMemory,
+         updateMemoryFromExchange,
          seedMemoryFromCharacter, memoryToContext,
          pruneMemoryByMsgIds }                                          from './memory.js';
-import { getSummaryForChat, deleteSummaryForChat,
-         shouldAutoSummarize, generateAndSaveSummary }                  from './summary.js';
+import { getSummaryState, saveSummaryState, deleteSummaryForChat,
+         buildSummaryContext,
+         computeRolling, computeChunk, computeMedium, computeGlobal,
+         shouldBuildChunk,
+         CHUNK_SIZE, MEDIUM_FROM_CHUNKS, GLOBAL_FROM_MEDIUMS,
+         generateAndSaveSummary }                                       from './summary.js';
 import { exportChat, importChatFromFile }                               from './export.js';
 import { escapeHtml, parseMessageMarkup, showToast, formatTimestamp }   from './ui.js';
 
@@ -40,11 +45,15 @@ function getProviderConfig(role = 'chat') {
     const model    = provider === 'ollama'
         ? (taskCfg.ollamaModel || null)
         : (taskCfg.geminiModel || null);
+    const modelFallback = provider === 'gemini'
+        ? (taskCfg.geminiModelFallback || null)
+        : null;
     return {
         provider,
         keys:      getShuffledApiKeys(cfg),
         ollamaUrl: cfg.ollamaBaseUrl || 'http://localhost:11434',
         model,
+        modelFallback,
         lang:      cfg.chatLang || 'pl',
     };
 }
@@ -68,6 +77,7 @@ let currentChatConfig    = null;
 let currentMessages      = [];
 let currentMemory        = null;
 let currentChatSummary   = null;
+let currentChatError     = null;   // { text, isRateLimit } — error bubble shown in chat
 let isLoading            = false;
 let lastFailedMessage    = null;
 let currentSummary       = '';
@@ -75,8 +85,6 @@ let memoryPanelOpen      = false;
 let aiResponseCount      = 0;
 let pendingRequests      = 0;
 let currentCharacterAvatarUrl = null;
-
-const MEMORY_UPDATE_EVERY = 1;
 
 function setPendingRequest(delta) {
     pendingRequests = Math.max(0, pendingRequests + delta);
@@ -251,7 +259,8 @@ async function selectChat(chatId) {
     currentChatConfig  = resolveChatConfig(currentChat);
     currentMessages    = await getMessagesForChat(chatId);
     currentMemory      = await getMemoryForChat(chatId);
-    currentChatSummary = await getSummaryForChat(chatId);
+    currentChatSummary = await getSummaryState(chatId);
+    currentChatError   = null;
     aiResponseCount    = currentMessages.filter(m => m.role === 'assistant').length;
 
     const titleEl = document.getElementById('chat-title');
@@ -283,6 +292,7 @@ async function deleteChatConfirm(chatId) {
 
     if (currentChat?.id === chatId) {
         currentChat = null; currentMessages = []; currentMemory = null; currentChatConfig = null;
+        currentChatError = null;
         if (chats.length > 0) await selectChat(chats[0].id);
         else showWelcomeScreen();
     }
@@ -303,8 +313,21 @@ async function appSendMessage(retryText) {
         showToast('Dodaj klucz API Gemini w ustawieniach czatu', 'error'); return;
     }
 
-    const userMsg = await addMessage(currentChat.id, 'user', message);
-    currentMessages = [...currentMessages, userMsg];
+    // On retry: the user message may already be saved in DB (from a previous failed attempt).
+    // Detect this to avoid inserting a duplicate.
+    const lastSaved = currentMessages[currentMessages.length - 1];
+    const alreadySaved = retryText && lastSaved?.role === 'user' && lastSaved?.content === retryText;
+
+    let userMsg;
+    if (alreadySaved) {
+        userMsg = lastSaved;
+    } else {
+        userMsg = await addMessage(currentChat.id, 'user', message);
+        currentMessages = [...currentMessages, userMsg];
+    }
+
+    // Clear any previous error bubble
+    currentChatError = null;
 
     if (currentMessages.filter(m => m.role === 'user').length === 1) {
         const title = message.substring(0, 55) + (message.length > 55 ? '…' : '');
@@ -322,55 +345,96 @@ async function appSendMessage(retryText) {
     showTypingIndicator();
 
     try {
-        const memCtx      = await memoryToContext(currentMemory, { query: message, cfg: embedCfg });
+        // ── Step 1: get AI response text (not saved to DB yet) ──
+        const memCtx       = await memoryToContext(currentMemory, { query: message, cfg: embedCfg });
         const systemPrompt = buildSystemPrompt(chatCfg, currentCharacter, memCtx);
         const chatTask     = getTaskCfg('chat');
 
         const response = await callChatAPI(chatCfg, {
             messages:      currentMessages,
             systemPrompt,
-            chatSummary:   currentChatSummary,
+            chatSummary: {
+                text:    buildSummaryContext(currentChatSummary),
+                rolling: currentChatSummary?.rolling?.text || '',
+            },
             temperature:   chatTask.temperature,
             maxTokens:     chatTask.maxTokens,
             contextTokens: chatTask.contextTokens,
         });
 
-        const aiMsg = await addMessage(currentChat.id, 'assistant', response);
+        // ── Step 2: compute background tasks (no DB writes, throw on failure) ──
+        const memCfg  = getProviderConfig('memory');
+        const sumCfg  = getProviderConfig('summary');
+        const chatId  = currentChat.id;
+        const char    = currentCharacter;
+        const msgs    = [...currentMessages];    // snapshot without AI msg
+        const state   = currentChatSummary ?? { chatId, rolling: null, chunks: [], medium: [], global: null };
+        const maxTok  = getTaskCfg('summary').maxTokens ?? 8192;
+        const doChunk = shouldBuildChunk(msgs, currentChatSummary);
+
+        const [computedMem, computedRolling, computedHistoryTiers] = await Promise.all([
+            computeMemoryUpdate(
+                chatId, message, response, memCfg,
+                char, msgs,
+                getTaskCfg('memory').maxTokens ?? 8192,
+                null,    // aiMsgSeqId unknown until commit
+                embedCfg
+            ),
+            computeRolling(msgs, char, sumCfg, Math.min(maxTok, 4096)),
+            doChunk ? _computeHistoryTiers(state, msgs, char, sumCfg, maxTok) : null,
+        ]);
+
+        // ── Step 3: all computed successfully → commit everything atomically ──
+        const aiMsg = await addMessage(chatId, 'assistant', response);
         currentMessages = [...currentMessages, aiMsg];
 
-        await updateChat(currentChat.id, {
+        await persistMemory(computedMem);
+
+        const newState = { ...state };
+        if (computedRolling) newState.rolling = computedRolling;
+        if (computedHistoryTiers) {
+            const { newChunk, newMedium, newGlobal } = computedHistoryTiers;
+            if (newChunk)  newState.chunks = [...(state.chunks || []), newChunk];
+            if (newMedium) newState.medium = [...(state.medium || []), newMedium];
+            if (newGlobal) newState.global  = newGlobal;
+        }
+        await saveSummaryState(newState);
+
+        // ── Step 4: update metadata & in-memory state ──
+        await updateChat(chatId, {
             messageCount:    currentMessages.length,
             lastMessage:     response.substring(0, 80),
             lastMessageTime: aiMsg.timestamp,
             updatedAt:       Date.now(),
         });
 
+        currentMemory      = computedMem;
+        currentChatSummary = newState;
+        aiResponseCount++;
+
         lastFailedMessage = null;
         hideRetryBar();
+
+        // ── Step 5: render ──
         renderMessages();
+        renderMemoryPanel();
         renderChatList(await getChatsForCharacter(currentCharacter.id));
 
-        aiResponseCount++;
-        if (aiResponseCount % MEMORY_UPDATE_EVERY === 0) {
-            setTimeout(() => triggerMemoryUpdate(message, response, aiMsg.seqId), 500);
-        }
-
-        if (shouldAutoSummarize(currentMessages, currentChatSummary, getTaskCfg('summary').everyN ?? 10)) {
-            setTimeout(() => triggerAutoSummary(), 800);
-        }
-
     } catch (err) {
-        await deleteMessageById(userMsg.id);
-        currentMessages = currentMessages.filter(m => m.id !== userMsg.id);
+        // Keep user message in chat. Show error bubble instead of deleting.
+        const isRateLimit = err instanceof AllModelsRateLimitedError;
+        const text = isRateLimit
+            ? formatRateLimitMsg(err)
+            : `Nie udało się przetworzyć wiadomości: ${err.message}`;
+
+        currentChatError = { text, isRateLimit };
         lastFailedMessage = message;
-        renderMessages();
-        showRetryBar(message);
-        if (err instanceof AllModelsRateLimitedError) {
-            showToast(formatRateLimitMsg(err), 'error', 8000);
+
+        renderMessages();   // re-renders with error bubble appended
+
+        if (isRateLimit) {
             document.getElementById('message-input')?.setAttribute('disabled', 'true');
             document.getElementById('send-btn')?.setAttribute('disabled', 'true');
-        } else {
-            showToast(err.message, 'error');
         }
     } finally {
         isLoading = false;
@@ -379,55 +443,34 @@ async function appSendMessage(retryText) {
     }
 }
 
-async function triggerMemoryUpdate(userMsg, aiMsg, aiMsgSeqId = null) {
-    const memCfg   = getProviderConfig('memory');
-    const embedCfg = getProviderConfig('embed');
-    setPendingRequest(+1);
-    try {
-        currentMemory = await updateMemoryFromExchange(
-            currentChat.id, userMsg, aiMsg, memCfg,
-            currentCharacter, currentMessages, getTaskCfg('memory').maxTokens ?? 8192,
-            aiMsgSeqId, embedCfg
-        );
-        renderMemoryPanel();
-    } catch (e) {
-        if (e instanceof AllModelsRateLimitedError) {
-            showToast(formatRateLimitMsg(e), 'error', 8000);
-        } else {
-            console.warn('[Memory] Background update failed:', e);
+/**
+ * Sequentially compute chunk → maybe medium → maybe global.
+ * Returns { newChunk, newMedium, newGlobal } (nulls for tiers not built).
+ */
+async function _computeHistoryTiers(state, messages, char, sumCfg, maxTok) {
+    const chunkIdx   = state.chunks?.length ?? 0;
+    const chunkStart = chunkIdx * CHUNK_SIZE;
+    const chunkEnd   = chunkStart + CHUNK_SIZE;
+    const chunkMsgs  = messages.slice(chunkStart, chunkEnd);
+
+    const newChunk = await computeChunk(chunkMsgs, char, sumCfg, Math.min(maxTok, 4096));
+
+    const allChunks    = [...(state.chunks || []), newChunk];
+    const totalChunks  = allChunks.length;
+    let newMedium = null;
+    let newGlobal = null;
+
+    if (totalChunks % MEDIUM_FROM_CHUNKS === 0) {
+        const mediumChunks = allChunks.slice(-MEDIUM_FROM_CHUNKS);
+        newMedium = await computeMedium(mediumChunks, char, sumCfg, Math.min(maxTok, 4096));
+
+        const allMediums  = [...(state.medium || []), newMedium];
+        if (allMediums.length % GLOBAL_FROM_MEDIUMS === 0) {
+            newGlobal = await computeGlobal(allMediums, char, sumCfg, maxTok);
         }
-    } finally {
-        setPendingRequest(-1);
     }
-}
 
-async function triggerAutoSummary() {
-    const sumCfg  = getProviderConfig('summary');
-    const chatId   = currentChat?.id;
-    const messages = [...currentMessages];
-    const char     = currentCharacter;
-    const existing = currentChatSummary;
-
-    if (!chatId || messages.length < 4) return;
-
-    setPendingRequest(+1);
-    try {
-        const newSummary = await generateAndSaveSummary(
-            chatId, messages, char, existing, sumCfg,
-            getTaskCfg('summary').maxTokens ?? 8192
-        );
-        if (currentChat?.id === chatId) {
-            currentChatSummary = newSummary;
-        }
-    } catch (e) {
-        if (e instanceof AllModelsRateLimitedError) {
-            showToast(formatRateLimitMsg(e), 'error', 8000);
-        } else {
-            console.warn('[Summary] Auto-summary failed:', e.message);
-        }
-    } finally {
-        setPendingRequest(-1);
-    }
+    return { newChunk, newMedium, newGlobal };
 }
 
 // ============ RETRY ============
@@ -478,6 +521,26 @@ function renderMessages() {
 
     container.scrollTop = container.scrollHeight;
     updateScrollButtonVisibility();
+
+    // Append error bubble if present (not saved to DB, UI-only)
+    if (currentChatError) {
+        const errDiv = document.createElement('div');
+        errDiv.className = `message ai chat-error-message${currentChatError.isRateLimit ? ' rate-limit-error' : ''}`;
+        errDiv.innerHTML = `
+            <div class="message-wrapper">
+                <div>
+                    <div class="message-content error-content">
+                        ⚠️ ${escapeHtml(currentChatError.text)}
+                    </div>
+                    <div class="message-time error-actions">
+                        <button class="btn-link retry-inline-btn" onclick="app.retryLastMessage()">Spróbuj ponownie</button>
+                        <button class="btn-link dismiss-error-btn" onclick="app.dismissChatError()">Odrzuć</button>
+                    </div>
+                </div>
+            </div>`;
+        container.appendChild(errDiv);
+        container.scrollTop = container.scrollHeight;
+    }
 }
 
 function showTypingIndicator() {
@@ -602,6 +665,27 @@ async function deleteMessageFrom(msgId) {
         lastMessage:     last?.content.substring(0, 80) ?? null,
         lastMessageTime: last?.timestamp ?? null,
     });
+
+    // Rebuild summary — old state is stale after message deletion.
+    // Keep only rolling (recomputed from remaining); discard chunks/medium/global.
+    const sumCfg = getProviderConfig('summary');
+    const maxTok = getTaskCfg('summary').maxTokens ?? 8192;
+    const freshState = { chatId: currentChat.id, rolling: null, chunks: [], medium: [], global: null };
+
+    if (remaining.length >= 2) {
+        try {
+            showToast('Przeliczam podsumowanie…', 'info', 2000);
+            const computedRolling = await computeRolling(
+                remaining, currentCharacter, sumCfg, Math.min(maxTok, 4096)
+            );
+            if (computedRolling) freshState.rolling = computedRolling;
+        } catch (e) {
+            console.warn('[Summary] Rebuild after delete failed:', e.message);
+        }
+    }
+
+    await saveSummaryState(freshState);
+    currentChatSummary = freshState;
 
     renderMessages();
     renderChatList(await getChatsForCharacter(currentCharacter.id));
@@ -728,20 +812,32 @@ async function generateSummary() {
     openModal('summary-modal');
 
     try {
-        const record = await generateAndSaveSummary(
+        const newState = await generateAndSaveSummary(
             currentChat.id, currentMessages, currentCharacter, currentChatSummary,
             sumCfg, getTaskCfg('summary').maxTokens ?? 8192
         );
-        currentChatSummary = record;
-        currentSummary     = record?.text || '';
+        currentChatSummary = newState;
+        const contextText  = buildSummaryContext(newState);
+        const displayText  = newState.rolling?.text || contextText || '(brak treści)';
 
         if (summaryContent) {
-            summaryContent.innerHTML =
-                `<pre style="white-space:pre-wrap;word-wrap:break-word;font-size:13px;line-height:1.6">${escapeHtml(currentSummary)}</pre>`;
+            // Show rolling summary prominently + collapsible full context
+            let html = `<pre style="white-space:pre-wrap;word-wrap:break-word;font-size:13px;line-height:1.6">${escapeHtml(displayText)}</pre>`;
+            if (contextText) {
+                html += `<details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;color:var(--text-secondary)">Pełny kontekst historyczny (${newState.chunks.length} okien, ${newState.medium.length} pośrednich)</summary>
+<pre style="white-space:pre-wrap;font-size:11px;line-height:1.5;margin-top:8px;color:var(--text-secondary)">${escapeHtml(contextText)}</pre></details>`;
+            }
+            summaryContent.innerHTML = html;
         }
-        if (infoEl && record) {
-            infoEl.textContent = `Covers first ${record.upToMessageCount} messages — saved to chat.`;
+        if (infoEl) {
+            const parts = [`Rolling: ostatnie ≤${50} wiadomości`];
+            if (newState.chunks.length)  parts.push(`${newState.chunks.length} okien szczegółowych`);
+            if (newState.medium.length)  parts.push(`${newState.medium.length} podsumowań pośrednich`);
+            if (newState.global)         parts.push('podsumowanie globalne');
+            infoEl.textContent = parts.join(' · ');
         }
+        // keep currentSummary for copy
+        currentSummary = displayText;
     } catch (err) {
         closeModal('summary-modal');
         showToast(err.message, 'error');
@@ -878,6 +974,19 @@ window.app = {
         if (lastFailedMessage) { hideRetryBar(); appSendMessage(lastFailedMessage); }
     },
     dismissRetry: () => { lastFailedMessage = null; hideRetryBar(); },
+
+    retryLastMessage() {
+        if (!lastFailedMessage) return;
+        const msg = lastFailedMessage;
+        lastFailedMessage = null;
+        currentChatError  = null;
+        appSendMessage(msg);
+    },
+
+    dismissChatError() {
+        currentChatError = null;
+        renderMessages();
+    },
 
     closeModals: closeAllModals,
 

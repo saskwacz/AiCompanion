@@ -3,12 +3,11 @@ import { dbAdd, dbGet, dbPut, dbDelete, dbGetAll } from './db.js';
 export async function createCharacter(data) {
     const now = Date.now();
     const char = {
-        name:             data.name             || 'New Character',
-        prompt:           data.prompt           || 'You are a helpful, friendly AI assistant.',
-        welcomeMessage:   data.welcomeMessage   || 'Hello! How can I help you?',
-        scenario:         data.scenario         || '',
-        characterDetails: data.characterDetails || '',
-        dialogueExamples: data.dialogueExamples || '',
+        name:               data.name               || 'New Character',
+        welcomeMessage:     data.welcomeMessage     || 'Hello! How can I help you?',
+        scenario:           data.scenario           || '',
+        characterDetails:   data.characterDetails   || '',
+        promptInstructions: data.promptInstructions || '',
         createdAt: now,
         updatedAt: now,
     };
@@ -19,6 +18,17 @@ export async function createCharacter(data) {
 export async function updateCharacter(id, data) {
     const existing = await dbGet('characters', id);
     if (!existing) throw new Error('Character not found');
+    // Migrate legacy field names on first update
+    if (existing.prompt !== undefined && data.promptInstructions === undefined) {
+        data = { ...data, promptInstructions: data.promptInstructions ?? existing.dialogueExamples ?? '' };
+    }
+    if (existing.dialogueExamples !== undefined) {
+        const { dialogueExamples, prompt, ...rest } = existing;
+        const migrated = { ...rest, promptInstructions: rest.promptInstructions || dialogueExamples || '' };
+        const updated = { ...migrated, ...data, id, updatedAt: Date.now() };
+        await dbPut('characters', updated);
+        return updated;
+    }
     const updated = { ...existing, ...data, id, updatedAt: Date.now() };
     await dbPut('characters', updated);
     return updated;

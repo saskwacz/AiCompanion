@@ -56,19 +56,21 @@ export const GEMINI_EMBED_LIST = [
  */
 export const GEMINI_DEFAULTS = {
     chat: {
-        provider:      'gemini',
-        temperature:   0.7,
-        maxTokens:     8192,
-        contextTokens: 8000,
-        geminiModel:   GEMINI_MODELS.CHAT_PRIMARY,
-        ollamaModel:   'llama3.1:8b',
+        provider:             'gemini',
+        temperature:          0.7,
+        maxTokens:            8192,
+        contextTokens:        8000,
+        geminiModel:          GEMINI_MODELS.CHAT_PRIMARY,
+        geminiModelFallback:  GEMINI_MODELS.CHAT_FALLBACK,
+        ollamaModel:          'llama3.1:8b',
     },
     memory: {
-        provider:    'gemini',
-        temperature: 0.1,
-        maxTokens:   8192,
-        geminiModel: GEMINI_MODELS.MEMORY_PRIMARY,
-        ollamaModel: 'qwen3:8b',
+        provider:             'gemini',
+        temperature:          0.1,
+        maxTokens:            8192,
+        geminiModel:          GEMINI_MODELS.MEMORY_PRIMARY,
+        geminiModelFallback:  GEMINI_MODELS.MEMORY_FALLBACK,
+        ollamaModel:          'qwen3:8b',
     },
     summary: {
         provider:    'gemini',

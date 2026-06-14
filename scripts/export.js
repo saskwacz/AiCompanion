@@ -2,7 +2,7 @@ import { getChatById, createChat, updateChat }              from './chats.js';
 import { getCharacterById, createCharacter, saveCharacterAvatar, getCharacterAvatar } from './characters.js';
 import { getMessagesForChat, addMessage }                  from './messages.js';
 import { getMemoryForChat, saveMemory, memoryForExport, memoryFromImport } from './memory.js';
-import { getSummaryForChat, saveSummaryForChat }           from './summary.js';
+import { getSummaryState, saveSummaryState }               from './summary.js';
 
 // ============ HELPERS ============
 /** Convert Blob to base64 string */
@@ -32,32 +32,41 @@ function base64ToBlob(base64, mimeType = 'image/jpeg') {
 
 // ============ EXPORT ============
 export async function exportChat(chatId) {
-    const [chat, messages, memory, summary] = await Promise.all([
+    const [chat, messages, memory, summaryState] = await Promise.all([
         getChatById(chatId),
         getMessagesForChat(chatId),
         getMemoryForChat(chatId),
-        getSummaryForChat(chatId),
+        getSummaryState(chatId),
     ]);
-    const character = await getCharacterById(chat.characterId);
-    const avatarBlob = await getCharacterAvatar(chat.characterId);
+    const character    = await getCharacterById(chat.characterId);
+    const avatarBlob   = await getCharacterAvatar(chat.characterId);
     const avatarBase64 = await blobToBase64(avatarBlob);
 
     const data = {
-        version:    4,
+        version:    5,
         exportedAt: new Date().toISOString(),
         character:  { ...character, id: undefined, avatarBase64 },
-        chat:       {
+        chat: {
             ...chat,
             id:          undefined,
             characterId: undefined,
-            // Strip API keys from exported config — security: keys should not travel in plain JSON files.
-            // The recipient can sync keys from their own global settings after import.
-            config: chat.config ? { ...chat.config, apiKeys: [] } : null,
+            // API keys are exported so the user can restore a full backup.
+            // Recipient should treat this file as sensitive.
+            config: chat.config ?? null,
         },
-        messages:   messages.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp })),
-        memory:     memoryForExport(memory),
-        summary: summary
-            ? { text: summary.text, upToMessageCount: summary.upToMessageCount, createdAt: summary.createdAt }
+        messages: messages.map(m => ({
+            role:      m.role,
+            content:   m.content,
+            timestamp: m.timestamp,
+        })),
+        memory:  memoryForExport(memory),
+        summary: summaryState
+            ? {
+                rolling:  summaryState.rolling  ?? null,
+                chunks:   summaryState.chunks   ?? [],
+                medium:   summaryState.medium   ?? [],
+                global:   summaryState.global   ?? null,
+              }
             : null,
     };
 
@@ -85,15 +94,14 @@ export function importChatFromFile(file) {
                     throw new Error('Invalid export file format (missing version or messages)');
                 }
 
-                // Re-create character
+                // Re-create character — migrate legacy field names
                 const cd        = data.character || {};
                 const character = await createCharacter({
-                    name:             cd.name             || 'Imported Character',
-                    prompt:           cd.prompt           || '',
-                    welcomeMessage:   cd.welcomeMessage   || '',
-                    scenario:         cd.scenario         || '',
-                    characterDetails: cd.characterDetails || '',
-                    dialogueExamples: cd.dialogueExamples || '',
+                    name:               cd.name               || 'Imported Character',
+                    welcomeMessage:     cd.welcomeMessage     || '',
+                    scenario:           cd.scenario           || '',
+                    characterDetails:   cd.characterDetails   || '',
+                    promptInstructions: cd.promptInstructions || cd.dialogueExamples || '',
                 });
 
                 // Restore avatar if present
@@ -106,10 +114,8 @@ export function importChatFromFile(file) {
                     }
                 }
 
-                // Re-create chat (pass config from export; strip any stale keys)
-                const importedConfig = data.chat?.config
-                    ? { ...data.chat.config, apiKeys: [] }
-                    : null;
+                // Re-create chat — restore config including API keys
+                const importedConfig = data.chat?.config ?? null;
                 const chat = await createChat(character.id, importedConfig);
                 await updateChat(chat.id, {
                     title:           data.chat?.title  || 'Imported Chat',
@@ -123,14 +129,35 @@ export function importChatFromFile(file) {
                     await addMessage(chat.id, m.role, m.content);
                 }
 
-                // Re-import memory (v3 schema; v2 legacy keys migrated automatically)
+                // Re-import memory
                 if (data.memory) {
                     await saveMemory(memoryFromImport(data.memory, chat.id));
                 }
 
-                // Re-import rolling summary (v2+)
-                if (data.summary?.text) {
-                    await saveSummaryForChat(chat.id, data.summary.text, data.summary.upToMessageCount ?? 0);
+                // Re-import summary — support both v5 tiered format and legacy v2–v4 flat format
+                if (data.summary) {
+                    const s = data.summary;
+                    let state;
+                    if ('chunks' in s) {
+                        // v5 tiered format — restore directly
+                        state = {
+                            chatId:  chat.id,
+                            rolling: s.rolling ?? null,
+                            chunks:  s.chunks  ?? [],
+                            medium:  s.medium  ?? [],
+                            global:  s.global  ?? null,
+                        };
+                    } else if (s.text) {
+                        // v2–v4 legacy flat format — wrap as rolling summary
+                        state = {
+                            chatId:  chat.id,
+                            rolling: { text: s.text, updatedAt: s.createdAt ?? Date.now() },
+                            chunks:  [],
+                            medium:  [],
+                            global:  null,
+                        };
+                    }
+                    if (state) await saveSummaryState(state);
                 }
 
                 resolve({ character, chat });

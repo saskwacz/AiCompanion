@@ -40,12 +40,17 @@ export function trimMessagesByTokens(messages, maxContextTokens) {
     return result;
 }
 
-export function selectChatMessages(messages, chatSummary, contextTokens) {
-    let recent = chatSummary?.upToMessageCount != null
-        ? messages.slice(chatSummary.upToMessageCount)
-        : trimMessagesByTokens(messages, contextTokens);
+const RECENT_WINDOW   = 50;   // rolling summary window (matches summary.js ROLLING_WINDOW)
+const CHAT_MSG_WINDOW = 20;   // verbatim messages sent when historical context is present
 
-    // Ensure history starts with a user turn (required by most chat models)
+export function selectChatMessages(messages, chatSummary, contextTokens) {
+    if (chatSummary?.text || chatSummary?.rolling) {
+        const recent = messages.slice(-CHAT_MSG_WINDOW);
+        let i = 0;
+        while (i < recent.length && recent[i].role !== 'user') i++;
+        return recent.slice(i);
+    }
+    let recent = trimMessagesByTokens(messages, contextTokens);
     while (recent.length > 0 && recent[0].role !== 'user') {
         recent = recent.slice(1);
     }
@@ -56,15 +61,28 @@ export function selectChatMessages(messages, chatSummary, contextTokens) {
 
 /**
  * Build the system prompt for a chat turn.
- * Appends the rolling summary as a compact block when present.
+ * Appends historical summaries and rolling summary when present.
  */
 export function buildOllamaChatSystemPrompt(systemPrompt, chatSummary) {
-    if (!chatSummary?.text) return systemPrompt;
-    return (
-        systemPrompt +
-        '\n\n[EARLIER CONVERSATION — use as background context]\n' +
-        chatSummary.text
-    );
+    if (!chatSummary?.text && !chatSummary?.rolling) return systemPrompt;
+
+    const parts = [systemPrompt];
+
+    if (chatSummary.text) {
+        parts.push(
+            '[EARLIER CONVERSATION — use as background context]\n' +
+            chatSummary.text
+        );
+    }
+
+    if (chatSummary.rolling) {
+        parts.push(
+            '[RECENT EVENTS — rolling summary of the last ~50 messages]\n' +
+            chatSummary.rolling
+        );
+    }
+
+    return parts.join('\n\n');
 }
 
 /**
@@ -96,8 +114,9 @@ export function buildOllamaChatMessages(recentMessages) {
 export function buildSystemPrompt(character, memCtx = '') {
     const parts = [];
 
-    // Character prompt (core personality) always comes first
-    if (character.prompt) parts.push(character.prompt);
+    // Primary instructions (formerly dialogue examples)
+    if (character.promptInstructions)
+        parts.push(character.promptInstructions);
 
     // Memory block — compact format for small context windows
     if (memCtx) {
@@ -109,14 +128,6 @@ export function buildSystemPrompt(character, memCtx = '') {
                 .join('\n') +
             '\n--- END MEMORY ---'
         );
-    }
-
-    if (character.scenario) {
-        parts.push(`[Scene] ${character.scenario}`);
-    }
-
-    if (character.dialogueExamples) {
-        parts.push(`[Example dialogue]\n${character.dialogueExamples}`);
     }
 
     return parts.join('\n\n').trim();
@@ -167,8 +178,8 @@ export function buildMemoryUpdatePrompt(existing, character, recentMessages, use
     const charCtx = character
         ? [
             `CHARACTER NAME: ${character.name}`,
-            character.scenario         ? `SCENARIO: ${character.scenario}`           : '',
-            character.dialogueExamples ? `DIALOGUE EXAMPLES:\n${character.dialogueExamples}` : '',
+            character.scenario           ? `SCENARIO: ${character.scenario}`                          : '',
+            character.promptInstructions ? `CHARACTER INSTRUCTIONS:\n${character.promptInstructions}` : '',
           ].filter(Boolean).join('\n')
         : '';
 
@@ -234,11 +245,8 @@ OUTPUT SCHEMA:
 ${schema}
 
 CHARACTER NAME: ${character.name}
-PERSONALITY PROMPT: ${character.prompt || 'none'}
 SCENARIO: ${character.scenario || 'none'}
 CHARACTER DETAILS: ${character.characterDetails || 'none'}
-DIALOGUE EXAMPLES:
-${character.dialogueExamples || 'none'}
 
 Extract ONLY from the above definition:
 - charProfile  : facts, preferences, personality traits, appearance, backstory — max 15 short sentences
@@ -261,16 +269,52 @@ Respond with ONLY the JSON object. No other text.`;
  * - Output format is requested as numbered bullets so the small model
  *   stays focused and produces a predictable, scannable result.
  */
-export function buildSummaryPrompt({ convText, charName, previousSummaryText }) {
-    const background = previousSummaryText
-        ? `BACKGROUND (from earlier in the conversation):\n${previousSummaryText}\n\n`
-        : '';
+export function buildSummaryPrompt({ convText, charName, previousSummaryText, type = 'rolling', fromMsg, toMsg }) {
+    switch (type) {
 
-    return `${background}Summarise the conversation below between a user and ${charName}.
+        case 'chunk': {
+            const loc = (fromMsg != null && toMsg != null) ? ` (msgs ${fromMsg}–${toMsg})` : '';
+            return `Write a detailed summary of this conversation window${loc} between a user and ${charName}.
+Cover all key topics, facts about the user, important decisions, and emotional moments. Be thorough — this is a historical record.
+
+CONVERSATION:
+${convText}
+
+DETAILED SUMMARY:`;
+        }
+
+        case 'medium': {
+            return `Below are summaries of several conversation windows with ${charName}.
+Write a higher-level overview (~1–2 paragraphs) synthesising this whole period.
+Focus on relationship dynamics, key user facts, and major events.
+
+WINDOW SUMMARIES:
+${convText}
+
+OVERVIEW:`;
+        }
+
+        case 'global': {
+            return `Below are medium-level summaries of the entire conversation with ${charName}.
+Write a concise master summary of the full relationship history (3–5 sentences).
+
+MEDIUM SUMMARIES:
+${convText}
+
+MASTER SUMMARY:`;
+        }
+
+        default: {  // 'rolling' and legacy
+            const background = previousSummaryText
+                ? `BACKGROUND (from earlier in the conversation):\n${previousSummaryText}\n\n`
+                : '';
+            return `${background}Summarise the conversation below between a user and ${charName}.
 Write clear, factual bullet points. Cover every important topic, fact about the user, key decision, and emotional moment. Be concise but complete — this summary replaces the full history.
 
 CONVERSATION:
 ${convText}
 
 SUMMARY (bullet points):`;
+        }
+    }
 }

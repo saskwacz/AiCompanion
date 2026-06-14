@@ -42,12 +42,11 @@ async function init() {
 }
 
 function populateForm(char) {
-    set('char-name',     char.name             || '');
-    set('char-prompt',   char.prompt           || '');
-    set('char-welcome',  char.welcomeMessage   || '');
-    set('char-scenario', char.scenario         || '');
-    set('char-details',  char.characterDetails || '');
-    set('char-dialogue', char.dialogueExamples || '');
+    set('char-name',         char.name               || '');
+    set('char-instructions', char.promptInstructions || char.dialogueExamples || ''); // migrate legacy
+    set('char-welcome',      char.welcomeMessage     || '');
+    set('char-scenario',     char.scenario           || '');
+    set('char-details',      char.characterDetails   || '');
 }
 
 async function loadAvatarPreview(id) {
@@ -95,11 +94,10 @@ window.saveCharacter = async function() {
 
     const data = {
         name,
-        prompt:           get('char-prompt'),
-        welcomeMessage:   get('char-welcome'),
-        scenario:         get('char-scenario'),
-        characterDetails: get('char-details'),
-        dialogueExamples: get('char-dialogue'),
+        promptInstructions: get('char-instructions'),
+        welcomeMessage:     get('char-welcome'),
+        scenario:           get('char-scenario'),
+        characterDetails:   get('char-details'),
     };
 
     try {

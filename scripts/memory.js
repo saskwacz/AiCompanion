@@ -29,7 +29,7 @@ const SECTION_LABELS = {
 };
 
 // ============ ITEM SHAPE ============
-// { id, text, count, firstSeen, embedding: number[] | null }
+// { id, text, firstSeen, embedding: number[] | null }
 
 export function createMemoryItem(text, existing = null, createdAtMsgId = null) {
     const now = Date.now();
@@ -37,7 +37,6 @@ export function createMemoryItem(text, existing = null, createdAtMsgId = null) {
     return {
         id:             existing?.id ?? crypto.randomUUID(),
         text,
-        count:          existing?.count ?? 1,
         firstSeen:      existing?.firstSeen ?? now,
         createdAtMsgId: existing?.createdAtMsgId ?? createdAtMsgId,
         embedding:      sameText ? (existing?.embedding ?? null) : null,
@@ -158,8 +157,8 @@ export function memoryForExport(mem) {
     const m = normalizeMemory(mem);
     const out = { schemaVersion: MEMORY_SCHEMA_VERSION };
     for (const key of MEMORY_KEYS) {
-        out[key] = (m[key] || []).map(({ id, text, count, firstSeen, createdAtMsgId, embedding }) => ({
-            id, text, count, firstSeen, createdAtMsgId: createdAtMsgId ?? null, embedding: embedding ?? null,
+        out[key] = (m[key] || []).map(({ id, text, firstSeen, createdAtMsgId, embedding }) => ({
+            id, text, firstSeen, createdAtMsgId: createdAtMsgId ?? null, embedding: embedding ?? null,
         }));
     }
     return out;
@@ -238,7 +237,7 @@ function fallbackItems(mem, perSection = MEMORY_FALLBACK_PER) {
     const m = normalizeMemory(mem);
     return MEMORY_KEYS.flatMap(key =>
         [...(m[key] || [])]
-            .sort((a, b) => (b.count || 1) - (a.count || 1))
+            .sort((a, b) => (b.firstSeen || 0) - (a.firstSeen || 0))
             .slice(0, perSection)
             .map(item => ({ ...item, section: key, score: 0 })),
     );
@@ -253,32 +252,40 @@ function formatMemoryContext(items) {
         bySection[item.section].push(item);
     }
 
+    const fmtItem = i => {
+        const fs = i.firstSeen ? ` [since: ${i.firstSeen}]` : '';
+        const sc = i.score > 0 ? ` [rel: ${i.score.toFixed(2)}]` : '';
+        return `${i.text}${fs}${sc}`;
+    };
+
     const fmtSection = (sectionKey, sectionItems) => {
         const label = SECTION_LABELS[sectionKey] || sectionKey;
         const lines = sectionItems
-            .sort((a, b) => (b.score || 0) - (a.score || 0) || (b.count || 1) - (a.count || 1))
-            .map(i => {
-                const c  = i.count || 1;
-                const fs = i.firstSeen ? ` [since: ${i.firstSeen}]` : '';
-                const sc = i.score > 0 ? ` [rel: ${i.score.toFixed(2)}]` : '';
-                const text = c > 1 ? `${i.text} [x${c}]${fs}${sc}` : `${i.text}${fs}${sc}`;
-                return text;
-            })
+            .sort((a, b) => (b.score || 0) - (a.score || 0))
+            .map(fmtItem)
             .join(' | ');
         return `${label}: ${lines}`;
     };
 
-    const charKeys = ['charProfile', 'charGoals', 'charMemories'];
-    const userKeys = ['profile', 'goals', 'memories'];
-
-    const charParts = charKeys.filter(k => bySection[k]?.length).map(k => fmtSection(k, bySection[k]));
-    const userParts = userKeys.filter(k => bySection[k]?.length).map(k => fmtSection(k, bySection[k]));
-
     const parts = [];
-    if (charParts.length) parts.push(`[ABOUT YOURSELF]\n${charParts.join('\n')}`);
-    if (userParts.length) parts.push(`[ABOUT THE USER]\n${userParts.join('\n')}`);
 
-    const ctx  = `[COMPANION MEMORY — semantic retrieval]\n${parts.join('\n\n')}`;
+    // ── Character self-knowledge ──
+    const charMemoryKeys = ['charProfile', 'charMemories'];
+    const charGoalKeys   = ['charGoals'];
+    const charMemParts   = charMemoryKeys.filter(k => bySection[k]?.length).map(k => fmtSection(k, bySection[k]));
+    const charGoalParts  = charGoalKeys.filter(k => bySection[k]?.length).map(k => fmtSection(k, bySection[k]));
+    if (charMemParts.length) parts.push(`[SEMANTIC MEMORY — about yourself]\n${charMemParts.join('\n')}`);
+    if (charGoalParts.length) parts.push(`[GOALS — your motivations]\n${charGoalParts.join('\n')}`);
+
+    // ── User knowledge ──
+    const userMemoryKeys = ['profile', 'memories'];
+    const userGoalKeys   = ['goals'];
+    const userMemParts   = userMemoryKeys.filter(k => bySection[k]?.length).map(k => fmtSection(k, bySection[k]));
+    const userGoalParts  = userGoalKeys.filter(k => bySection[k]?.length).map(k => fmtSection(k, bySection[k]));
+    if (userMemParts.length) parts.push(`[SEMANTIC MEMORY — about the user]\n${userMemParts.join('\n')}`);
+    if (userGoalParts.length) parts.push(`[GOALS — user's goals]\n${userGoalParts.join('\n')}`);
+
+    const ctx  = parts.join('\n\n');
     const note = '\n\n[NOTE] Memory items are ranked by relevance to the current message. Timestamps [since: …] mark when a fact was first learned.';
     return ctx + note;
 }
@@ -386,7 +393,6 @@ async function selectForUpdatePrompt(existing, exchangeText, embedCfg) {
  *
  * @param {object[]} existingItems  - current items for this section
  * @param {string[]} newStrings     - strings returned by the LLM for this section
- * @param {string}   exchangeText   - user + AI text (used for mention counting)
  * @param {*}        aiMsgSeqId     - message seq id for new items
  * @param {Set|null} selectedIds    - IDs of items that were shown to the LLM.
  *   null  → keep-all mode (seeding): never delete, only add/update existing.
@@ -396,8 +402,7 @@ async function selectForUpdatePrompt(existing, exchangeText, embedCfg) {
  *             • item NOT in selectedIds                  → PRESERVED (LLM never saw it)
  *             • new string not matching any existing     → ADDED
  */
-function mergeItems(existingItems, newStrings, exchangeText = '', aiMsgSeqId = null, selectedIds = null) {
-    const exNorm   = norm(exchangeText);
+function mergeItems(existingItems, newStrings, aiMsgSeqId = null, selectedIds = null) {
     const now      = Date.now();
     const existing = normalizeItems(existingItems);
     const newArr   = newStrings || [];
@@ -431,11 +436,9 @@ function mergeItems(existingItems, newStrings, exchangeText = '', aiMsgSeqId = n
             newMatched.add(matchIdx);
             const text        = newArr[matchIdx];
             const textChanged = norm(item.text) !== norm(text);
-            const mentioned   = norm(text).split(/\s+/).filter(w => w.length > 3).some(w => exNorm.includes(w));
             result.push({
                 id:             item.id,
                 text,
-                count:          (item.count || 1) + (mentioned ? 1 : 0),
                 firstSeen:      item.firstSeen ?? now,
                 createdAtMsgId: item.createdAtMsgId ?? aiMsgSeqId,
                 embedding:      textChanged ? null : (item.embedding ?? null),
@@ -447,15 +450,12 @@ function mergeItems(existingItems, newStrings, exchangeText = '', aiMsgSeqId = n
         // selective mode + not returned → item intentionally dropped by LLM → skip
     }
 
-    // Append new strings that didn't match any existing item
     for (let idx = 0; idx < newArr.length; idx++) {
         if (newMatched.has(idx)) continue;
-        const text      = newArr[idx];
-        const mentioned = norm(text).split(/\s+/).filter(w => w.length > 3).some(w => exNorm.includes(w));
+        const text = newArr[idx];
         result.push({
             id:             crypto.randomUUID(),
             text,
-            count:          mentioned ? 2 : 1,
             firstSeen:      now,
             createdAtMsgId: aiMsgSeqId,
             embedding:      null,
@@ -502,43 +502,66 @@ async function persistWithEmbeddings(mem, embedCfg) {
 }
 
 // ============ UPDATE MEMORY AFTER EXCHANGE ============
-export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, cfg, character, recentMessages = [], maxOutputTokens = 8192, aiMsgSeqId = null, embedCfg = null) {
+
+/**
+ * Compute the new memory (including embeddings) WITHOUT saving to DB.
+ * Throws on any error — caller decides whether to persist.
+ * @returns {object} fully-computed memory object ready to be saved
+ */
+export async function computeMemoryUpdate(chatId, userMsg, aiMsg, cfg, character, recentMessages = [], maxOutputTokens = 8192, aiMsgSeqId = null, embedCfg = null) {
     const existing     = normalizeMemory(await getMemoryForChat(chatId));
     const exchangeText = userMsg + ' ' + aiMsg;
 
-    // Select which items to show in the update prompt (semantic search on existing embeddings)
     const { promptMemory, selectedIds } = await selectForUpdatePrompt(existing, exchangeText, embedCfg);
     const prompt = providerBuildMemoryUpdatePrompt(cfg, promptMemory, character, recentMessages, userMsg, aiMsg);
 
+    const raw  = await callMemoryModel(prompt, maxOutputTokens, cfg, 'normal');
+    const flat = parseMemoryResponse(raw);
+
+    console.log('[Memory] Parsed:', JSON.stringify({
+        profile: flat.profile?.length, goals: flat.goals?.length,
+        charProfile: flat.charProfile?.length,
+    }));
+
+    // Goals use keep-all mode (null selectedIds): they are only updated or added,
+    // never deleted by omission — the LLM may simply not mention them when they're
+    // not relevant to the current exchange, but they should persist until explicitly replaced.
+    const miSelective = (key, ex) => mergeItems(ex || [], flat[key] || [], aiMsgSeqId, selectedIds);
+    const miKeepAll   = (key, ex) => mergeItems(ex || [], flat[key] || [], aiMsgSeqId, null);
+
+    const updated = {
+        ...existing,
+        profile:      miSelective('profile',      existing.profile),
+        goals:        miKeepAll(  'goals',        existing.goals),
+        memories:     miSelective('memories',     existing.memories),
+        charProfile:  miSelective('charProfile',  existing.charProfile),
+        charGoals:    miKeepAll(  'charGoals',    existing.charGoals),
+        charMemories: miSelective('charMemories', existing.charMemories),
+    };
+
+    const activeCfg = embedCfg || cfg;
+    return activeCfg ? await ensureEmbeddings(updated, activeCfg) : updated;
+}
+
+/** Save a pre-computed memory object to DB. */
+export async function persistMemory(mem) {
+    await saveMemory(mem);
+    return mem;
+}
+
+export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, cfg, character, recentMessages = [], maxOutputTokens = 8192, aiMsgSeqId = null, embedCfg = null) {
     try {
-        const raw  = await callMemoryModel(prompt, maxOutputTokens, cfg, 'normal');
-        const flat = parseMemoryResponse(raw);
-
-        console.log('[Memory] Parsed:', JSON.stringify({
-            profile: flat.profile?.length, goals: flat.goals?.length,
-            charProfile: flat.charProfile?.length,
-        }));
-
-        const mi = (key, ex) => mergeItems(ex || [], flat[key] || [], exchangeText, aiMsgSeqId, selectedIds);
-        const updated = {
-            ...existing,
-            profile:      mi('profile',      existing.profile),
-            goals:        mi('goals',        existing.goals),
-            memories:     mi('memories',     existing.memories),
-            charProfile:  mi('charProfile',  existing.charProfile),
-            charGoals:    mi('charGoals',    existing.charGoals),
-            charMemories: mi('charMemories', existing.charMemories),
-        };
-        return await persistWithEmbeddings(updated, embedCfg || cfg);
+        const computed = await computeMemoryUpdate(chatId, userMsg, aiMsg, cfg, character, recentMessages, maxOutputTokens, aiMsgSeqId, embedCfg);
+        return await persistMemory(computed);
     } catch (e) {
         console.warn('[Memory] Update failed:', e.message);
-        return existing;
+        return normalizeMemory(await getMemoryForChat(chatId));
     }
 }
 
 // ============ SEED / REFRESH FROM CHARACTER DEFINITION ============
 export async function seedMemoryFromCharacter(chatId, character, cfg, existingMemory, maxOutputTokens = 8192, embedCfg = null) {
-    const hasContent = character.characterDetails || character.scenario || character.prompt;
+    const hasContent = character.characterDetails || character.scenario;
     if (!hasContent) return;
 
     const existing = normalizeMemory(existingMemory || await getMemoryForChat(chatId));
@@ -547,9 +570,7 @@ export async function seedMemoryFromCharacter(chatId, character, cfg, existingMe
     try {
         const raw  = await callMemoryModel(prompt, maxOutputTokens, cfg, 'batch');
         const flat = parseMemoryResponse(raw);
-        const et   = [character.prompt, character.scenario,
-                      character.characterDetails, character.dialogueExamples].filter(Boolean).join(' ');
-        const mi   = (key, ex) => mergeItems(ex || [], flat[key], et);
+        const mi   = (key, ex) => mergeItems(ex || [], flat[key]);
 
         const seeded = {
             chatId,

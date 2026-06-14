@@ -85,10 +85,12 @@ function populateForm(cfg) {
     // Note: Gemini model dropdowns are filled by fillModelDropdowns() after this
     // store current gemini models to select them in the dropdowns
     window._pendingGeminiModels = {
-        chat:    cfg.chat.geminiModel    || GEMINI_DEFAULTS.chat.geminiModel,
-        memory:  cfg.memory.geminiModel  || GEMINI_DEFAULTS.memory.geminiModel,
-        summary: cfg.summary.geminiModel || GEMINI_DEFAULTS.summary.geminiModel,
-        embed:   cfg.embed.geminiModel   || GEMINI_DEFAULTS.embed.geminiModel,
+        chat:         cfg.chat.geminiModel         || GEMINI_DEFAULTS.chat.geminiModel,
+        chatFallback: cfg.chat.geminiModelFallback  ?? GEMINI_DEFAULTS.chat.geminiModelFallback,
+        memory:       cfg.memory.geminiModel       || GEMINI_DEFAULTS.memory.geminiModel,
+        memFallback:  cfg.memory.geminiModelFallback ?? GEMINI_DEFAULTS.memory.geminiModelFallback,
+        summary:      cfg.summary.geminiModel      || GEMINI_DEFAULTS.summary.geminiModel,
+        embed:        cfg.embed.geminiModel        || GEMINI_DEFAULTS.embed.geminiModel,
     };
 }
 
@@ -99,6 +101,10 @@ function fillModelDropdowns() {
     buildModelSelect('g-gemini-memory-model',  GEMINI_MEMORY_LIST,  pending.memory,  'g-gemini-memory-model-custom');
     buildModelSelect('g-gemini-summary-model', GEMINI_SUMMARY_LIST, pending.summary, 'g-gemini-summary-model-custom');
     buildModelSelect('g-gemini-embed-model',   GEMINI_EMBED_LIST,   pending.embed,   'g-gemini-embed-model-custom');
+
+    // Fallback dropdowns (include "brak" option)
+    buildFallbackSelect('g-gemini-chat-model-fallback',   GEMINI_CHAT_LIST,   pending.chatFallback);
+    buildFallbackSelect('g-gemini-memory-model-fallback', GEMINI_MEMORY_LIST, pending.memFallback);
 }
 
 function buildModelSelect(selectId, list, currentModel, customInputId) {
@@ -125,6 +131,33 @@ function buildModelSelect(selectId, list, currentModel, customInputId) {
             const ci = document.getElementById(customInputId);
             if (ci) ci.value = '';
         });
+    }
+}
+
+/**
+ * Build a fallback-model select.  Always has "— brak fallbacku —" as the first option (value "").
+ * @param {string} selectId
+ * @param {Array}  list          - model catalogue
+ * @param {string|null} current  - currently selected value (null/'' → no fallback)
+ */
+function buildFallbackSelect(selectId, list, current) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+
+    const noneOpt = `<option value=""${!current ? ' selected' : ''}>— brak fallbacku —</option>`;
+    const opts = list.map(m =>
+        `<option value="${escapeHtml(m.id)}"${m.id === current ? ' selected' : ''}>${escapeHtml(m.label)}</option>`
+    ).join('');
+
+    sel.innerHTML = noneOpt + opts;
+
+    // If current is a custom model not in the list, prepend it
+    if (current && !list.find(m => m.id === current)) {
+        const opt = document.createElement('option');
+        opt.value       = current;
+        opt.textContent = current + ' (własny)';
+        opt.selected    = true;
+        sel.insertBefore(opt, sel.options[1]); // after "brak" option
     }
 }
 
@@ -283,19 +316,21 @@ function collectConfig() {
 
     return {
         chat: {
-            provider:      str('g-chat-provider',       'gemini'),
-            temperature:   pf ('g-chat-temp',           0.7),
-            maxTokens:     pi ('g-chat-max-tokens',     8192),
-            contextTokens: pi ('g-chat-ctx',            8000),
-            geminiModel:   str('g-gemini-chat-model',   GEMINI_DEFAULTS.chat.geminiModel),
-            ollamaModel:   str('g-ollama-chat-model',   OLLAMA_DEFAULTS.chat.ollamaModel),
+            provider:             str('g-chat-provider',       'gemini'),
+            temperature:          pf ('g-chat-temp',           0.7),
+            maxTokens:            pi ('g-chat-max-tokens',     8192),
+            contextTokens:        pi ('g-chat-ctx',            8000),
+            geminiModel:          str('g-gemini-chat-model',   GEMINI_DEFAULTS.chat.geminiModel),
+            geminiModelFallback:  document.getElementById('g-gemini-chat-model-fallback')?.value || null,
+            ollamaModel:          str('g-ollama-chat-model',   OLLAMA_DEFAULTS.chat.ollamaModel),
         },
         memory: {
-            provider:    str('g-memory-provider',    'gemini'),
-            temperature: pf ('g-memory-temp',        0.1),
-            maxTokens:   pi ('g-memory-max-tokens',  8192),
-            geminiModel: str('g-gemini-memory-model', GEMINI_DEFAULTS.memory.geminiModel),
-            ollamaModel: str('g-ollama-memory-model', OLLAMA_DEFAULTS.memory.ollamaModel),
+            provider:             str('g-memory-provider',    'gemini'),
+            temperature:          pf ('g-memory-temp',        0.1),
+            maxTokens:            pi ('g-memory-max-tokens',  8192),
+            geminiModel:          str('g-gemini-memory-model', GEMINI_DEFAULTS.memory.geminiModel),
+            geminiModelFallback:  document.getElementById('g-gemini-memory-model-fallback')?.value || null,
+            ollamaModel:          str('g-ollama-memory-model', OLLAMA_DEFAULTS.memory.ollamaModel),
         },
         summary: {
             provider:    str('g-summary-provider',    'gemini'),

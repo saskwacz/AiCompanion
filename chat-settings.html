@@ -226,6 +226,11 @@
                                oninput="syncCustomModel(this,'g-gemini-chat-model')">
                     </div>
                 </div>
+                <div class="setting-group">
+                    <label for="g-gemini-chat-model-fallback">Fallback model (gdy limity 429 wyczerpane)</label>
+                    <small class="field-hint" style="margin-bottom:6px">Gdy wszystkie klucze API są zablokowane dla modelu głównego, system automatycznie przełącza się na ten model.</small>
+                    <select id="g-gemini-chat-model-fallback" class="setting-input"></select>
+                </div>
             </div>
 
             <!-- Gemini > Memory model -->
@@ -238,6 +243,11 @@
                         <input type="text" id="g-gemini-memory-model-custom" class="setting-input" placeholder="gemini-3.0-flash"
                                oninput="syncCustomModel(this,'g-gemini-memory-model')">
                     </div>
+                </div>
+                <div class="setting-group">
+                    <label for="g-gemini-memory-model-fallback">Fallback model (gdy limity 429 wyczerpane)</label>
+                    <small class="field-hint" style="margin-bottom:6px">Gdy wszystkie klucze API są zablokowane dla modelu głównego, system automatycznie przełącza się na ten model.</small>
+                    <select id="g-gemini-memory-model-fallback" class="setting-input"></select>
                 </div>
             </div>
 

@@ -15,12 +15,12 @@
 export function buildSystemPrompt(character, memCtx = '') {
     const parts = [];
 
-    if (character.prompt) parts.push(character.prompt);
-    if (memCtx)           parts.push(memCtx);
-    if (character.scenario)
-        parts.push(`Scenariusz: ${character.scenario}`);
-    if (character.dialogueExamples)
-        parts.push(`Przykłady dialogów:\n${character.dialogueExamples}`);
+    // Primary instructions (formerly dialogue examples)
+    if (character.promptInstructions)
+        parts.push(character.promptInstructions);
+
+    // Injected memory context
+    if (memCtx) parts.push(memCtx);
 
     const instruction = [];
     if (memCtx && memCtx.includes('[since:')) {
@@ -65,8 +65,8 @@ export function buildMemoryUpdatePrompt(existing, character, recentMessages, use
 
     const charCtx = character ? [
         `IMIĘ POSTACI: ${character.name}`,
-        character.scenario         ? `SCENARIUSZ: ${character.scenario}`                       : '',
-        character.dialogueExamples ? `PRZYKŁADY DIALOGÓW:\n${character.dialogueExamples}`     : '',
+        character.scenario           ? `SCENARIUSZ: ${character.scenario}`                         : '',
+        character.promptInstructions ? `INSTRUKCJE POSTACI:\n${character.promptInstructions}`      : '',
     ].filter(Boolean).join('\n') : '';
 
     return `Jesteś asystentem ekstrakcji pamięci dla postaci AI o imieniu ${companionName}.
@@ -109,11 +109,8 @@ Analiza poniższej definicji postaci — wypełnij dokładnie 3 klucze JSON.
 ODPOWIADAJ WYŁĄCZNIE PO POLSKU — wszystkie wartości w tablicach muszą być w języku polskim.
 
 IMIĘ POSTACI: ${character.name}
-PROMPT OSOBOWOŚCI: ${character.prompt || 'brak'}
 SCENARIUSZ: ${character.scenario || 'brak'}
 SZCZEGÓŁY POSTACI: ${character.characterDetails || 'brak'}
-PRZYKŁADY DIALOGÓW:
-${character.dialogueExamples || 'brak'}
 
 Wyodrębnij TYLKO z powyższej definicji postaci:
 - "charProfile"  : fakty o sobie, preferencje i cechy osobowości (wygląd, przeszłość, hobby, charakter) — maks. 15 krótkich zdań
@@ -127,12 +124,60 @@ Zasady:
 
 // ─── SUMMARY ─────────────────────────────────────────────────────────────────
 
-export function buildSummaryPrompt({ convText, charName, previousSummaryText }) {
-    const prevSection = previousSummaryText
-        ? `POPRZEDNIE PODSUMOWANIE (uwzględnij poniższe):\n${previousSummaryText}\n\n---\n\n`
-        : '';
+export function buildSummaryPrompt({ convText, charName, previousSummaryText, type = 'rolling', fromMsg, toMsg }) {
+    switch (type) {
 
-    return `${prevSection}Napisz kompleksowe, szczegółowe podsumowanie poniższej rozmowy.
+        case 'rolling': {
+            const prev = previousSummaryText
+                ? `POPRZEDNI SKRÓT (dla kontekstu):\n${previousSummaryText}\n\n---\n\n`
+                : '';
+            return `${prev}Napisz ZWIĘZŁY skrót poniższego fragmentu rozmowy (ostatnie ~${50} wiadomości).
+Cel: szybka orientacja co się ostatnio działo — 3–6 zdań.
+Pisz w języku polskim. Nie pomijaj ważnych faktów, decyzji ani emocji.
+
+ROZMOWA:
+${convText}`;
+        }
+
+        case 'chunk': {
+            const loc = (fromMsg != null && toMsg != null) ? ` (wiadomości ${fromMsg}–${toMsg})` : '';
+            return `Napisz SZCZEGÓŁOWE podsumowanie poniższego okna rozmowy${loc}.
+To podsumowanie będzie przechowywane jako historyczny zapis. Uwzględnij WSZYSTKO co istotne:
+- Tematy, decyzje, fakty o użytkowniku i postaci
+- Ważne momenty, emocje, dynamikę relacji
+- Obietnice, żarty wewnętrzne, powtarzające się wątki
+Pisz w języku polskim. Bądź konkretny.
+
+ROZMOWA:
+${convText}`;
+        }
+
+        case 'medium': {
+            const loc = (fromMsg != null && toMsg != null) ? ` (wiad. ${fromMsg}–${toMsg})` : '';
+            return `Poniżej znajduje się ${charName ? `${20} szczegółowych podsumowań` : 'kilka podsumowań'} kolejnych okien rozmowy${loc}.
+Napisz OGÓLNE PODSUMOWANIE, które syntetyzuje cały ten okres (ok. 1000 wiadomości).
+Skup się na: głównych wątkach relacji, ważnych faktach o użytkowniku i postaci, kluczowych zdarzeniach.
+Pisz w języku polskim. Bądź zwięzły — to jest podsumowanie wyższego poziomu.
+
+PODSUMOWANIA OKIEN:
+${convText}`;
+        }
+
+        case 'global': {
+            return `Poniżej znajdują się podsumowania pośrednie całej rozmowy z ${charName || 'postacią AI'}.
+Napisz GLOBALNY PRZEGLĄD całej historii tej relacji.
+Uwzględnij: ewolucję relacji, najważniejsze fakty, kluczowe momenty, stałe wątki.
+Pisz w języku polskim. Bądź syntetyczny — to nadrzędny kontekst dla całej historii.
+
+PODSUMOWANIA POŚREDNIE:
+${convText}`;
+        }
+
+        default: {
+            const prevSection = previousSummaryText
+                ? `POPRZEDNIE PODSUMOWANIE (uwzględnij poniższe):\n${previousSummaryText}\n\n---\n\n`
+                : '';
+            return `${prevSection}Napisz kompleksowe, szczegółowe podsumowanie poniższej rozmowy.
 To podsumowanie ZASTĄPI pełną historię w przyszłych wywołaniach API, więc uwzględnij wszystko, co ważne.
 
 Obejmij:
@@ -148,4 +193,6 @@ Pisz w języku polskim.
 
 ROZMOWA:
 ${convText}`;
+        }
+    }
 }

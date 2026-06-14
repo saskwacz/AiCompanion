@@ -9,18 +9,18 @@
 // ─── CHAT — system prompt ─────────────────────────────────────────────────────
 
 /**
- * Full character system prompt: personality → memory → scenario → dialogue.
+ * Full character system prompt: instructions → memory.
  * Includes English language instruction.
  */
 export function buildSystemPrompt(character, memCtx = '') {
     const parts = [];
 
-    if (character.prompt) parts.push(character.prompt);
-    if (memCtx)           parts.push(memCtx);
-    if (character.scenario)
-        parts.push(`Scenario: ${character.scenario}`);
-    if (character.dialogueExamples)
-        parts.push(`Dialogue Examples:\n${character.dialogueExamples}`);
+    // Primary instructions (formerly dialogue examples)
+    if (character.promptInstructions)
+        parts.push(character.promptInstructions);
+
+    // Injected memory context
+    if (memCtx) parts.push(memCtx);
 
     const instruction = [];
     if (memCtx && memCtx.includes('[since:')) {
@@ -65,8 +65,8 @@ export function buildMemoryUpdatePrompt(existing, character, recentMessages, use
 
     const charCtx = character ? [
         `CHARACTER NAME: ${character.name}`,
-        character.scenario         ? `SCENARIO: ${character.scenario}`                     : '',
-        character.dialogueExamples ? `DIALOGUE EXAMPLES:\n${character.dialogueExamples}` : '',
+        character.scenario           ? `SCENARIO: ${character.scenario}`                              : '',
+        character.promptInstructions ? `CHARACTER INSTRUCTIONS:\n${character.promptInstructions}`    : '',
     ].filter(Boolean).join('\n') : '';
 
     return `You are a memory extraction assistant for an AI companion named ${companionName}.
@@ -109,11 +109,8 @@ Analyse the character definition below and fill exactly 3 JSON keys.
 ALL values must be written in ENGLISH.
 
 CHARACTER NAME: ${character.name}
-PERSONALITY PROMPT: ${character.prompt || 'none'}
 SCENARIO: ${character.scenario || 'none'}
 CHARACTER DETAILS: ${character.characterDetails || 'none'}
-DIALOGUE EXAMPLES:
-${character.dialogueExamples || 'none'}
 
 Extract ONLY from the definition above:
 - "charProfile"  : facts, preferences, personality traits, appearance, backstory — max 15 short sentences
@@ -127,12 +124,60 @@ Rules:
 
 // ─── SUMMARY ─────────────────────────────────────────────────────────────────
 
-export function buildSummaryPrompt({ convText, charName, previousSummaryText }) {
-    const prevSection = previousSummaryText
-        ? `PREVIOUS SUMMARY (incorporate this):\n${previousSummaryText}\n\n---\n\n`
-        : '';
+export function buildSummaryPrompt({ convText, charName, previousSummaryText, type = 'rolling', fromMsg, toMsg }) {
+    switch (type) {
 
-    return `${prevSection}Write a comprehensive, detailed summary of the conversation below.
+        case 'rolling': {
+            const prev = previousSummaryText
+                ? `PREVIOUS RECAP (for context):\n${previousSummaryText}\n\n---\n\n`
+                : '';
+            return `${prev}Write a CONCISE recap of the conversation excerpt below (last ~50 messages).
+Goal: quick orientation on what's happened recently — 3–6 sentences.
+Write in English. Don't omit important facts, decisions, or emotional moments.
+
+CONVERSATION:
+${convText}`;
+        }
+
+        case 'chunk': {
+            const loc = (fromMsg != null && toMsg != null) ? ` (messages ${fromMsg}–${toMsg})` : '';
+            return `Write a DETAILED summary of the conversation window below${loc}.
+This summary will be stored as a historical record. Include EVERYTHING significant:
+- Topics, decisions, facts about the user and character
+- Key moments, emotions, relationship dynamics
+- Promises, inside jokes, recurring themes
+Write in English. Be specific.
+
+CONVERSATION:
+${convText}`;
+        }
+
+        case 'medium': {
+            const loc = (fromMsg != null && toMsg != null) ? ` (msgs ${fromMsg}–${toMsg})` : '';
+            return `Below are detailed summaries of successive conversation windows${loc}.
+Write a HIGHER-LEVEL OVERVIEW that synthesises this whole period (~1000 messages).
+Focus on: main relationship threads, key facts about the user and character, major events.
+Write in English. Be concise — this is a higher-level summary.
+
+WINDOW SUMMARIES:
+${convText}`;
+        }
+
+        case 'global': {
+            return `Below are medium-level summaries covering the entire conversation with ${charName || 'the AI character'}.
+Write a GLOBAL OVERVIEW of the full relationship history.
+Include: relationship evolution, most important facts, key moments, persistent themes.
+Write in English. Be synthetic — this is the top-level context for the whole history.
+
+MEDIUM SUMMARIES:
+${convText}`;
+        }
+
+        default: {
+            const prevSection = previousSummaryText
+                ? `PREVIOUS SUMMARY (incorporate this):\n${previousSummaryText}\n\n---\n\n`
+                : '';
+            return `${prevSection}Write a comprehensive, detailed summary of the conversation below.
 This summary will REPLACE the full history in future API calls, so include everything important.
 
 Cover:
@@ -148,4 +193,6 @@ Write in English.
 
 CONVERSATION:
 ${convText}`;
+        }
+    }
 }
