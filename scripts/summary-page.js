@@ -255,9 +255,29 @@ function render() {
     }
 
     if (state.prohibitedMsgIds?.length) {
+        const prohibitedSet = new Set(state.prohibitedMsgIds);
+        const prohibitedMsgs = msgs.filter(m => prohibitedSet.has(m.id));
+
+        const rowsHtml = prohibitedMsgs.length
+            ? prohibitedMsgs.map(m => {
+                const role    = m.role === 'user' ? 'Użytkownik' : 'AI';
+                const preview = m.content ? escapeHtml(m.content.slice(0, 300)) + (m.content.length > 300 ? '…' : '') : '<em>brak treści</em>';
+                const time    = m.timestamp ? new Date(m.timestamp).toLocaleString() : '';
+                return `<div class="prohibited-msg-row">
+                    <div class="prohibited-msg-meta">
+                        <span class="prohibited-msg-role ${m.role === 'user' ? 'role-user' : 'role-ai'}">${role}</span>
+                        <span class="prohibited-msg-seq">#${m.seqId ?? m.id}</span>
+                        <span class="prohibited-msg-time">${time}</span>
+                    </div>
+                    <div class="prohibited-msg-content">${preview}</div>
+                </div>`;
+            }).join('')
+            : `<p class="field-hint" style="padding:8px 0">Identyfikatory: ${state.prohibitedMsgIds.join(', ')}</p>`;
+
         parts.push(`<section class="sum-section">
-            <h4 class="sum-tier-label" style="color:var(--warning,#d97706)">&#9888; Wiadomości wykluczone z podsumowania</h4>
-            <p class="field-hint">${state.prohibitedMsgIds.length} wiadomość(i) oznaczona jako prohibited — nie brana pod uwagę przy obliczaniu L1.</p>
+            <h4 class="sum-tier-label sum-tier-label--warn">&#9888; Wiadomości wykluczone z podsumowania <span class="sum-tier-badge">${state.prohibitedMsgIds.length}</span></h4>
+            <p class="field-hint" style="margin-bottom:10px">Te wiadomości spowodowały błąd <em>prohibited content</em> i są pomijane przy obliczaniu L1.</p>
+            <div class="prohibited-msg-list">${rowsHtml}</div>
         </section>`);
     }
 
