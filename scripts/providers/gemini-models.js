@@ -7,12 +7,13 @@
 
 // ─── Internal model name constants ─────────────────────────────────────────────
 export const GEMINI_MODELS = {
-    CHAT_PRIMARY:    'gemini-3.5-flash',
-    CHAT_FALLBACK:   'gemini-3.1-flash-lite',
-    MEMORY_PRIMARY:  'gemini-3-flash-preview',
-    MEMORY_FALLBACK: 'gemini-3.1-flash-lite',
-    SUMMARY:         'gemini-3.1-flash-lite',
-    EMBEDDING:       'gemini-embedding-2',
+    CHAT_PRIMARY:     'gemini-3.5-flash',
+    CHAT_FALLBACK:    'gemini-3.1-flash-lite',
+    MEMORY_PRIMARY:   'gemini-3-flash-preview',
+    MEMORY_FALLBACK:  'gemini-3.1-flash-lite',
+    SUMMARY:          'gemini-3.1-flash-lite',
+    SUMMARY_FALLBACK: 'gemini-2.0-flash-lite',
+    EMBEDDING:        'gemini-embedding-2',
 };
 
 // ─── UI catalogues ─────────────────────────────────────────────────────────────
@@ -73,12 +74,13 @@ export const GEMINI_DEFAULTS = {
         ollamaModel:          'qwen3:8b',
     },
     summary: {
-        provider:    'gemini',
-        temperature: 0.3,
-        maxTokens:   8192,
-        everyN:      10,
-        geminiModel: GEMINI_MODELS.SUMMARY,
-        ollamaModel: 'phi3:mini',
+        provider:             'gemini',
+        temperature:          0.3,
+        maxTokens:            8192,
+        everyN:               10,
+        geminiModel:          GEMINI_MODELS.SUMMARY,
+        geminiModelFallback:  GEMINI_MODELS.SUMMARY_FALLBACK,
+        ollamaModel:          'phi3:mini',
     },
     embed: {
         provider:    'gemini',

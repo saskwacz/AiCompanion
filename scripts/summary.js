@@ -32,13 +32,17 @@ function genId() {
 }
 
 function defaultState(chatId) {
-    return { chatId, rolling: null, chunks: [], medium: [], global: null };
+    return { chatId, rolling: null, chunks: [], medium: [], global: null, prohibitedMsgIds: [] };
 }
 
 /** Migrate old single-record format → new tiered format. */
 function migrateState(raw) {
     if (!raw) return null;
-    if ('chunks' in raw) return raw;   // already new format
+    if ('chunks' in raw) {
+        // Ensure new field exists on legacy tiered records
+        if (!raw.prohibitedMsgIds) raw.prohibitedMsgIds = [];
+        return raw;
+    }
     // Old: { chatId, text, upToMessageCount, createdAt }
     const state = defaultState(raw.chatId);
     if (raw.text) {
@@ -57,8 +61,86 @@ export async function saveSummaryState(state) {
     await dbPut('summaries', { ...state, savedAt: Date.now() });
 }
 
+/** Mark a message ID as prohibited (excluded from L1 chunk computation). */
+export function markMsgProhibited(state, msgId) {
+    const ids = state.prohibitedMsgIds ?? [];
+    if (ids.includes(msgId)) return state;
+    return { ...state, prohibitedMsgIds: [...ids, msgId] };
+}
+
+/** Remove message IDs from the prohibited list (called after message deletion). */
+export function cleanProhibitedIds(state, deletedIds) {
+    const deleted = new Set(deletedIds);
+    return { ...state, prohibitedMsgIds: (state.prohibitedMsgIds ?? []).filter(id => !deleted.has(id)) };
+}
+
 export async function deleteSummaryForChat(chatId) {
     await dbDelete('summaries', chatId);
+}
+
+// ─── Prohibited-content helper ────────────────────────────────────────────────
+export function isProhibitedContent(err) {
+    return /PROHIBITED|blocked by Gemini|SAFETY|RECITATION/i.test(err?.message ?? '');
+}
+
+// ─── Fallback compute wrappers ────────────────────────────────────────────────
+/**
+ * Rolling fallback: on PROHIBITED shrink window from the oldest end,
+ * halving each time. Returns null only if even a minimal window fails.
+ */
+export async function computeRollingFallback(msgs, char, cfg, maxTok) {
+    const MIN_WINDOW = 5;
+    let win = msgs;
+    while (win.length >= MIN_WINDOW) {
+        try {
+            return await computeRolling(win, char, cfg, maxTok);
+        } catch (e) {
+            if (!isProhibitedContent(e)) throw e;
+            const next = win.slice(Math.ceil(win.length / 2));
+            console.warn(`[Summary] Rolling fallback: shrink ${win.length} → ${next.length}`);
+            win = next;
+        }
+    }
+    return null;
+}
+
+/**
+ * Chunk fallback: on PROHIBITED split in halves recursively (up to MAX_DEPTH).
+ * Returns { chunks: ChunkObj[], prohibited: number[] (msg IDs) }
+ * Multiple sub-chunks are combined into a single entry.
+ */
+export async function computeChunkFallback(msgs, char, cfg, maxTok, depth = 0) {
+    const MAX_DEPTH = 2;
+    const MIN_MSGS  = 5;
+    try {
+        const chunk = await computeChunk(msgs, char, cfg, maxTok);
+        return { chunks: [chunk], prohibited: [] };
+    } catch (e) {
+        if (!isProhibitedContent(e)) throw e;
+        if (depth >= MAX_DEPTH || msgs.length <= MIN_MSGS) {
+            console.warn(`[Summary] L1 fallback exhausted (${msgs.length} msgs) — marking prohibited`);
+            return { chunks: [], prohibited: msgs.map(m => m.id) };
+        }
+        const mid = Math.ceil(msgs.length / 2);
+        console.warn(`[Summary] L1 fallback: split ${msgs.length} msgs at ${mid}`);
+        const [r1, r2] = await Promise.all([
+            computeChunkFallback(msgs.slice(0, mid), char, cfg, maxTok, depth + 1),
+            computeChunkFallback(msgs.slice(mid),    char, cfg, maxTok, depth + 1),
+        ]);
+        const allChunks     = [...r1.chunks, ...r2.chunks];
+        const allProhibited = [...r1.prohibited, ...r2.prohibited];
+        if (allChunks.length > 1) {
+            const combined = {
+                id:        `chunk-${Date.now()}`,
+                text:      allChunks.map(c => c.text).join('\n\n'),
+                fromMsg:   msgs[0].seqId,
+                toMsg:     msgs.at(-1).seqId,
+                createdAt: Date.now(),
+            };
+            return { chunks: [combined], prohibited: allProhibited };
+        }
+        return { chunks: allChunks, prohibited: allProhibited };
+    }
 }
 
 // ─── Context builder for chat system prompt ───────────────────────────────────
@@ -144,19 +226,20 @@ export async function computeChunk(chunkMsgs, character, cfg, maxOutputTokens = 
     return { id: genId(), text, fromMsg, toMsg, createdAt: Date.now() };
 }
 
-/** Compute a medium summary from MEDIUM_FROM_CHUNKS chunk objects. */
-export async function computeMedium(chunks, character, cfg, maxOutputTokens = 4096) {
-    const charName = character?.name || 'Companion';
-    const convText = chunks.map((c, i) =>
+/** Compute a medium summary from a slice of chunk objects.
+ *  fromChunkAbs — absolute index of the first chunk in state.chunks (used for staleness checks). */
+export async function computeMedium(chunks, character, cfg, maxOutputTokens = 4096, fromChunkAbs = 0) {
+    const charName    = character?.name || 'Companion';
+    const convText    = chunks.map((c, i) =>
         `Sekcja ${i + 1} (wiad. ${c.fromMsg}–${c.toMsg}):\n${c.text}`
     ).join('\n\n---\n\n');
-    const fromChunk = 0;   // relative within the passed slice
-    const toChunk   = chunks.length - 1;
+    const fromChunkAbs_ = fromChunkAbs;
+    const toChunkAbs    = fromChunkAbs + chunks.length - 1;
     const fromMsg   = chunks[0]?.fromMsg ?? 0;
     const toMsg     = chunks[chunks.length - 1]?.toMsg ?? 0;
     const prompt = providerBuildSummaryPrompt(cfg, { convText, charName, type: 'medium', fromMsg, toMsg });
     const text = await callSummaryAPI(cfg, { prompt, maxOutputTokens });
-    return { id: genId(), text, fromChunk, toChunk, fromMsg, toMsg, createdAt: Date.now() };
+    return { id: genId(), text, fromChunkAbs: fromChunkAbs_, toChunkAbs, fromMsg, toMsg, createdAt: Date.now() };
 }
 
 /** Compute a global summary from all medium summaries. */

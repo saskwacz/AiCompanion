@@ -270,11 +270,12 @@ Respond with ONLY the JSON object. No other text.`;
  *   stays focused and produces a predictable, scannable result.
  */
 export function buildSummaryPrompt({ convText, charName, previousSummaryText, type = 'rolling', fromMsg, toMsg }) {
+    const skipNote = 'If any part contains content you cannot process, skip it and summarise the rest.\n\n';
     switch (type) {
 
         case 'chunk': {
             const loc = (fromMsg != null && toMsg != null) ? ` (msgs ${fromMsg}–${toMsg})` : '';
-            return `Write a detailed summary of this conversation window${loc} between a user and ${charName}.
+            return `${skipNote}Write a detailed summary of this conversation window${loc} between a user and ${charName}.
 Cover all key topics, facts about the user, important decisions, and emotional moments. Be thorough — this is a historical record.
 
 CONVERSATION:
@@ -284,7 +285,7 @@ DETAILED SUMMARY:`;
         }
 
         case 'medium': {
-            return `Below are summaries of several conversation windows with ${charName}.
+            return `${skipNote}Below are summaries of several conversation windows with ${charName}.
 Write a higher-level overview (~1–2 paragraphs) synthesising this whole period.
 Focus on relationship dynamics, key user facts, and major events.
 
@@ -295,7 +296,7 @@ OVERVIEW:`;
         }
 
         case 'global': {
-            return `Below are medium-level summaries of the entire conversation with ${charName}.
+            return `${skipNote}Below are medium-level summaries of the entire conversation with ${charName}.
 Write a concise master summary of the full relationship history (3–5 sentences).
 
 MEDIUM SUMMARIES:

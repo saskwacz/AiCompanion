@@ -125,13 +125,14 @@ Zasady:
 // ─── SUMMARY ─────────────────────────────────────────────────────────────────
 
 export function buildSummaryPrompt({ convText, charName, previousSummaryText, type = 'rolling', fromMsg, toMsg }) {
+    const skipNote = 'WAŻNE: Jeśli fragment rozmowy zawiera treści których nie możesz przetworzyć, pomiń ten fragment i podsumuj resztę. Nie odmawiaj całej odpowiedzi.\n\n';
     switch (type) {
 
         case 'rolling': {
             const prev = previousSummaryText
                 ? `POPRZEDNI SKRÓT (dla kontekstu):\n${previousSummaryText}\n\n---\n\n`
                 : '';
-            return `${prev}Napisz ZWIĘZŁY skrót poniższego fragmentu rozmowy (ostatnie ~${50} wiadomości).
+            return `${skipNote}${prev}Napisz ZWIĘZŁY skrót poniższego fragmentu rozmowy (ostatnie ~${50} wiadomości).
 Cel: szybka orientacja co się ostatnio działo — 3–6 zdań.
 Pisz w języku polskim. Nie pomijaj ważnych faktów, decyzji ani emocji.
 
@@ -141,7 +142,7 @@ ${convText}`;
 
         case 'chunk': {
             const loc = (fromMsg != null && toMsg != null) ? ` (wiadomości ${fromMsg}–${toMsg})` : '';
-            return `Napisz SZCZEGÓŁOWE podsumowanie poniższego okna rozmowy${loc}.
+            return `${skipNote}Napisz SZCZEGÓŁOWE podsumowanie poniższego okna rozmowy${loc}.
 To podsumowanie będzie przechowywane jako historyczny zapis. Uwzględnij WSZYSTKO co istotne:
 - Tematy, decyzje, fakty o użytkowniku i postaci
 - Ważne momenty, emocje, dynamikę relacji
@@ -154,7 +155,7 @@ ${convText}`;
 
         case 'medium': {
             const loc = (fromMsg != null && toMsg != null) ? ` (wiad. ${fromMsg}–${toMsg})` : '';
-            return `Poniżej znajduje się ${charName ? `${20} szczegółowych podsumowań` : 'kilka podsumowań'} kolejnych okien rozmowy${loc}.
+            return `${skipNote}Poniżej znajduje się ${charName ? `${20} szczegółowych podsumowań` : 'kilka podsumowań'} kolejnych okien rozmowy${loc}.
 Napisz OGÓLNE PODSUMOWANIE, które syntetyzuje cały ten okres (ok. 1000 wiadomości).
 Skup się na: głównych wątkach relacji, ważnych faktach o użytkowniku i postaci, kluczowych zdarzeniach.
 Pisz w języku polskim. Bądź zwięzły — to jest podsumowanie wyższego poziomu.
@@ -164,7 +165,7 @@ ${convText}`;
         }
 
         case 'global': {
-            return `Poniżej znajdują się podsumowania pośrednie całej rozmowy z ${charName || 'postacią AI'}.
+            return `${skipNote}Poniżej znajdują się podsumowania pośrednie całej rozmowy z ${charName || 'postacią AI'}.
 Napisz GLOBALNY PRZEGLĄD całej historii tej relacji.
 Uwzględnij: ewolucję relacji, najważniejsze fakty, kluczowe momenty, stałe wątki.
 Pisz w języku polskim. Bądź syntetyczny — to nadrzędny kontekst dla całej historii.

@@ -112,6 +112,11 @@ export function rlClear(keyValue, model) {
 
 // ─── Rate-limit error classes ────────────────────────────────────────────────
 
+/** Returns true when the error is a Gemini PROHIBITED / SAFETY / RECITATION block. */
+function isProhibited(err) {
+    return /PROHIBITED|blocked by Gemini|SAFETY|RECITATION/i.test(err?.message ?? '');
+}
+
 export class RateLimitError extends Error {
     constructor(model) {
         super(`Limit API Gemini (429) dla modelu "${model}"`);
@@ -140,9 +145,9 @@ export class AllModelsRateLimitedError extends Error {
 
 // ─── Helper: single-model call (no model fallback) ──────────────────────────
 /** Wraps withKeyFallback, converts RateLimitError → AllModelsRateLimitedError. */
-async function singleModelCall(model, apiKey, fn) {
+async function singleModelCall(model, apiKey, fn, shuffle = false) {
     try {
-        return await withKeyFallback(apiKey, model, fn, model);
+        return await withKeyFallback(apiKey, model, fn, model, shuffle);
     } catch (e) {
         if (e instanceof RateLimitError) throw new AllModelsRateLimitedError([model]);
         throw e;
@@ -160,9 +165,16 @@ function modelUrl(model, action = 'generateContent') {
     return `${API_BASE}/${model}:${action}`;
 }
 
-function keyItems(apiKey) {
-    const items = Array.isArray(apiKey) ? apiKey : [apiKey];
+function keyItems(apiKey, shuffle = false) {
+    const items = Array.isArray(apiKey) ? [...apiKey] : [apiKey];
     if (!items.length) throw new Error('No Gemini API key provided');
+    if (shuffle && items.length > 1) {
+        // Fisher-Yates shuffle
+        for (let i = items.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [items[i], items[j]] = [items[j], items[i]];
+        }
+    }
     return items;
 }
 
@@ -182,8 +194,8 @@ function plainKey(item) {
  * @param {function} fn      - (key) => Promise
  * @param {string|null} model - model being called; used for per-key rate-limit tracking
  */
-async function withKeyFallback(apiKey, purpose, fn, model = null) {
-    const items = keyItems(apiKey);
+async function withKeyFallback(apiKey, purpose, fn, model = null, shuffle = false) {
+    const items = keyItems(apiKey, shuffle);
     let lastErr = null;
 
     for (let i = 0; i < items.length; i++) {
@@ -205,6 +217,11 @@ async function withKeyFallback(apiKey, purpose, fn, model = null) {
                 if (model) rlMarkBlocked(key, model); // mark this key+model as blocked
                 console.warn(`[Gemini] "${label}" rate-limited (429) for "${e.model}" — trying next key…`);
                 continue; // no delay for 429, try next key immediately
+            }
+            // PROHIBITED CONTENT — retrying with other keys won't help; fail immediately
+            if (isProhibited(e)) {
+                console.warn(`[Gemini] "${label}" prohibited content — not retrying other keys.`);
+                throw e;
             }
             console.warn(`[Gemini] "${label}" failed (${purpose}):`, e.message);
             if (i < items.length - 1) {
@@ -238,14 +255,14 @@ async function geminiFetch(key, model, payload, action = 'generateContent') {
  * Try models in order, skipping those blocked by rate limit.
  * Converts all RateLimitErrors into AllModelsRateLimitedError when exhausted.
  */
-async function withModelFallback({ apiKey, purpose, primaryModel, fallbackModel, fn }) {
+async function withModelFallback({ apiKey, purpose, primaryModel, fallbackModel, fn, shuffle = false }) {
     const candidates = [primaryModel];
     if (fallbackModel && fallbackModel !== primaryModel) candidates.push(fallbackModel);
 
     let lastErr;
     for (const model of candidates) {
         try {
-            return await withKeyFallback(apiKey, `${purpose} [${model}]`, key => fn(key, model), model);
+            return await withKeyFallback(apiKey, `${purpose} [${model}]`, key => fn(key, model), model, shuffle);
         } catch (e) {
             lastErr = e;
             if (e instanceof RateLimitError) {
@@ -389,9 +406,11 @@ export async function callGeminiForMemory({ prompt, apiKey, maxOutputTokens = 81
 
 // ============ SUMMARY ============
 
-export async function callGeminiForSummary({ apiKey, prompt, maxOutputTokens = 8192, summaryModel }) {
-    const model = summaryModel || GEMINI_MODELS.SUMMARY;
-    return singleModelCall(model, apiKey, (key) => {
+export async function callGeminiForSummary({ apiKey, prompt, maxOutputTokens = 8192, summaryModel, summaryModelFallback }) {
+    const primaryModel  = summaryModel || GEMINI_MODELS.SUMMARY;
+    const fallbackModel = summaryModelFallback ?? (summaryModel ? null : GEMINI_MODELS.SUMMARY_FALLBACK);
+
+    const run = (key, model) => {
         if (window.DEBUG_PROMPTS) {
             console.groupCollapsed(`[Prompt] Summary [${model}]`);
             console.log(prompt);
@@ -400,7 +419,17 @@ export async function callGeminiForSummary({ apiKey, prompt, maxOutputTokens = 8
         return geminiFetch(key, model, {
             contents:         [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: { temperature: 0.3, maxOutputTokens, topP: 0.95 },
+            safetySettings:   SAFETY_NONE,
         }).then(data => extractText(data));
+    };
+
+    return withModelFallback({
+        apiKey,
+        purpose:       'Summary',
+        primaryModel,
+        fallbackModel,
+        fn:            run,
+        shuffle:       true,
     });
 }
 

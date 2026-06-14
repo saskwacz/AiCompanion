@@ -37,12 +37,13 @@ export async function deleteMessageById(id) { return dbDelete('messages', id); }
  * of the seqId values that were removed (for memory pruning).
  */
 export async function deleteMessagesFrom(chatId, fromId) {
-    const all      = await getMessagesForChat(chatId);
-    const toDelete = all.filter(m => m.id >= fromId);
+    const all       = await getMessagesForChat(chatId);
+    const toDelete  = all.filter(m => m.id >= fromId);
     const deletedSeqIds = toDelete.map(m => m.seqId).filter(s => s != null);
+    const deletedIds    = toDelete.map(m => m.id);
     for (const m of toDelete) await dbDelete('messages', m.id);
     const remaining = all.filter(m => m.id < fromId);
-    return { remaining, deletedSeqIds };
+    return { remaining, deletedSeqIds, deletedIds };
 }
 
 export async function deleteAllForChat(chatId) {

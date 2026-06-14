@@ -85,12 +85,13 @@ function populateForm(cfg) {
     // Note: Gemini model dropdowns are filled by fillModelDropdowns() after this
     // store current gemini models to select them in the dropdowns
     window._pendingGeminiModels = {
-        chat:         cfg.chat.geminiModel         || GEMINI_DEFAULTS.chat.geminiModel,
-        chatFallback: cfg.chat.geminiModelFallback  ?? GEMINI_DEFAULTS.chat.geminiModelFallback,
-        memory:       cfg.memory.geminiModel       || GEMINI_DEFAULTS.memory.geminiModel,
-        memFallback:  cfg.memory.geminiModelFallback ?? GEMINI_DEFAULTS.memory.geminiModelFallback,
-        summary:      cfg.summary.geminiModel      || GEMINI_DEFAULTS.summary.geminiModel,
-        embed:        cfg.embed.geminiModel        || GEMINI_DEFAULTS.embed.geminiModel,
+        chat:          cfg.chat.geminiModel             || GEMINI_DEFAULTS.chat.geminiModel,
+        chatFallback:  cfg.chat.geminiModelFallback     ?? GEMINI_DEFAULTS.chat.geminiModelFallback,
+        memory:        cfg.memory.geminiModel           || GEMINI_DEFAULTS.memory.geminiModel,
+        memFallback:   cfg.memory.geminiModelFallback   ?? GEMINI_DEFAULTS.memory.geminiModelFallback,
+        summary:       cfg.summary.geminiModel          || GEMINI_DEFAULTS.summary.geminiModel,
+        sumFallback:   cfg.summary.geminiModelFallback  ?? GEMINI_DEFAULTS.summary.geminiModelFallback,
+        embed:         cfg.embed.geminiModel            || GEMINI_DEFAULTS.embed.geminiModel,
     };
 }
 
@@ -103,8 +104,9 @@ function fillModelDropdowns() {
     buildModelSelect('g-gemini-embed-model',   GEMINI_EMBED_LIST,   pending.embed,   'g-gemini-embed-model-custom');
 
     // Fallback dropdowns (include "brak" option)
-    buildFallbackSelect('g-gemini-chat-model-fallback',   GEMINI_CHAT_LIST,   pending.chatFallback);
-    buildFallbackSelect('g-gemini-memory-model-fallback', GEMINI_MEMORY_LIST, pending.memFallback);
+    buildFallbackSelect('g-gemini-chat-model-fallback',     GEMINI_CHAT_LIST,    pending.chatFallback);
+    buildFallbackSelect('g-gemini-memory-model-fallback',   GEMINI_MEMORY_LIST,  pending.memFallback);
+    buildFallbackSelect('g-gemini-summary-model-fallback',  GEMINI_SUMMARY_LIST, pending.sumFallback);
 }
 
 function buildModelSelect(selectId, list, currentModel, customInputId) {
@@ -200,7 +202,6 @@ window.switchTab = function(btn, name) {
     document.querySelectorAll('.cs-outer-panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(`cs-panel-${name}`)?.classList.add('active');
-    if (name === 'gemini') renderRateLimitStatus();
 };
 
 /** Inner tab (inside Gemini or Ollama panel) */
@@ -333,12 +334,13 @@ function collectConfig() {
             ollamaModel:          str('g-ollama-memory-model', OLLAMA_DEFAULTS.memory.ollamaModel),
         },
         summary: {
-            provider:    str('g-summary-provider',    'gemini'),
-            temperature: pf ('g-summary-temp',        0.3),
-            maxTokens:   pi ('g-summary-max-tokens',  8192),
-            everyN:      pi ('g-summary-every',       10),
-            geminiModel: str('g-gemini-summary-model', GEMINI_DEFAULTS.summary.geminiModel),
-            ollamaModel: str('g-ollama-summary-model', OLLAMA_DEFAULTS.summary.ollamaModel),
+            provider:            str('g-summary-provider',    'gemini'),
+            temperature:         pf ('g-summary-temp',        0.3),
+            maxTokens:           pi ('g-summary-max-tokens',  8192),
+            everyN:              pi ('g-summary-every',       10),
+            geminiModel:         str('g-gemini-summary-model', GEMINI_DEFAULTS.summary.geminiModel),
+            geminiModelFallback: document.getElementById('g-gemini-summary-model-fallback')?.value || null,
+            ollamaModel:         str('g-ollama-summary-model', OLLAMA_DEFAULTS.summary.ollamaModel),
         },
         embed: {
             provider:    str('g-embed-provider',    'gemini'),

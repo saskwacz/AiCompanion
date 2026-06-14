@@ -74,8 +74,8 @@ const PROVIDERS = {
         callMemory: ({ prompt, maxOutputTokens, keys, priority, model, modelFallback }) =>
             callGeminiForMemory({ prompt, apiKey: keys, maxOutputTokens, priority, memoryModel: model, memoryModelFallback: modelFallback }),
 
-        callSummary: ({ prompt, maxOutputTokens, keys, model }) =>
-            callGeminiForSummary({ prompt, apiKey: keys, maxOutputTokens, summaryModel: model }),
+        callSummary: ({ prompt, maxOutputTokens, keys, model, modelFallback }) =>
+            callGeminiForSummary({ prompt, apiKey: keys, maxOutputTokens, summaryModel: model, summaryModelFallback: modelFallback }),
 
         embedText: ({ text, keys, model }) =>
             geminiEmbedText({ apiKey: keys, text, embedModel: model }),
@@ -153,9 +153,10 @@ export function callMemoryAPI(cfg, { prompt, maxOutputTokens, priority = 'normal
 export function callSummaryAPI(cfg, { prompt, maxOutputTokens }) {
     return getProvider(cfg.provider).callSummary({
         prompt, maxOutputTokens,
-        keys:      cfg.keys,
-        ollamaUrl: cfg.ollamaUrl,
-        model:     cfg.model ?? null,
+        keys:          cfg.keys,
+        ollamaUrl:     cfg.ollamaUrl,
+        model:         cfg.model ?? null,
+        modelFallback: cfg.modelFallback ?? null,
     });
 }
 

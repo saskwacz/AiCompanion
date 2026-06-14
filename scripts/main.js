@@ -14,7 +14,9 @@ import { getMemoryForChat, computeMemoryUpdate, persistMemory,
 import { getSummaryState, saveSummaryState, deleteSummaryForChat,
          buildSummaryContext,
          computeRolling, computeChunk, computeMedium, computeGlobal,
-         shouldBuildChunk,
+         shouldBuildChunk, markMsgProhibited, cleanProhibitedIds,
+         isProhibitedContent,
+         computeRollingFallback, computeChunkFallback,
          CHUNK_SIZE, MEDIUM_FROM_CHUNKS, GLOBAL_FROM_MEDIUMS,
          generateAndSaveSummary }                                       from './summary.js';
 import { exportChat, importChatFromFile }                               from './export.js';
@@ -368,20 +370,24 @@ async function appSendMessage(retryText) {
         const chatId  = currentChat.id;
         const char    = currentCharacter;
         const msgs    = [...currentMessages];    // snapshot without AI msg
-        const state   = currentChatSummary ?? { chatId, rolling: null, chunks: [], medium: [], global: null };
+        const state   = currentChatSummary ?? { chatId, rolling: null, chunks: [], medium: [], global: null, prohibitedMsgIds: [] };
         const maxTok  = getTaskCfg('summary').maxTokens ?? 8192;
         const doChunk = shouldBuildChunk(msgs, currentChatSummary);
 
+        let rollingProhibited = false;
         const [computedMem, computedRolling, computedHistoryTiers] = await Promise.all([
             computeMemoryUpdate(
                 chatId, message, response, memCfg,
                 char, msgs,
                 getTaskCfg('memory').maxTokens ?? 8192,
-                null,    // aiMsgSeqId unknown until commit
+                null,
                 embedCfg
             ),
-            computeRolling(msgs, char, sumCfg, Math.min(maxTok, 4096)),
-            doChunk ? _computeHistoryTiers(state, msgs, char, sumCfg, maxTok) : null,
+            computeRollingFallback(msgs, char, sumCfg, Math.min(maxTok, 4096))
+                .then(r => { if (r === null) rollingProhibited = true; return r; }),
+            doChunk
+                ? _computeHistoryTiers(state, msgs, char, sumCfg, maxTok)
+                : null,
         ]);
 
         // ── Step 3: all computed successfully → commit everything atomically ──
@@ -390,13 +396,21 @@ async function appSendMessage(retryText) {
 
         await persistMemory(computedMem);
 
-        const newState = { ...state };
+        let newState = { ...state };
         if (computedRolling) newState.rolling = computedRolling;
+        // If rolling failed due to prohibited content, mark the AI message
+        if (rollingProhibited) newState = markMsgProhibited(newState, aiMsg.id);
         if (computedHistoryTiers) {
-            const { newChunk, newMedium, newGlobal } = computedHistoryTiers;
+            const { newChunk, newMedium, newGlobal, newProhibitedIds } = computedHistoryTiers;
             if (newChunk)  newState.chunks = [...(state.chunks || []), newChunk];
             if (newMedium) newState.medium = [...(state.medium || []), newMedium];
             if (newGlobal) newState.global  = newGlobal;
+            if (newProhibitedIds?.length) {
+                newState.prohibitedMsgIds = [
+                    ...(newState.prohibitedMsgIds || []),
+                    ...newProhibitedIds,
+                ];
+            }
         }
         await saveSummaryState(newState);
 
@@ -443,17 +457,23 @@ async function appSendMessage(retryText) {
     }
 }
 
-/**
- * Sequentially compute chunk → maybe medium → maybe global.
- * Returns { newChunk, newMedium, newGlobal } (nulls for tiers not built).
- */
+/** Returns true when an API error indicates prohibited/blocked content (not a network/rate error). */
 async function _computeHistoryTiers(state, messages, char, sumCfg, maxTok) {
+    const prohibitedIds = new Set(state.prohibitedMsgIds ?? []);
+    const filteredMsgs  = messages.filter(m => !prohibitedIds.has(m.id));
+
     const chunkIdx   = state.chunks?.length ?? 0;
     const chunkStart = chunkIdx * CHUNK_SIZE;
     const chunkEnd   = chunkStart + CHUNK_SIZE;
-    const chunkMsgs  = messages.slice(chunkStart, chunkEnd);
+    const chunkMsgs  = filteredMsgs.slice(chunkStart, chunkEnd);
 
-    const newChunk = await computeChunk(chunkMsgs, char, sumCfg, Math.min(maxTok, 4096));
+    const { chunks: fallbackChunks, prohibited: newProhibitedIds } =
+        await computeChunkFallback(chunkMsgs, char, sumCfg, Math.min(maxTok, 4096));
+
+    const newChunk = fallbackChunks[0] ?? null;
+    if (!newChunk) {
+        return { newChunk: null, newMedium: null, newGlobal: null, newProhibitedIds };
+    }
 
     const allChunks    = [...(state.chunks || []), newChunk];
     const totalChunks  = allChunks.length;
@@ -461,16 +481,29 @@ async function _computeHistoryTiers(state, messages, char, sumCfg, maxTok) {
     let newGlobal = null;
 
     if (totalChunks % MEDIUM_FROM_CHUNKS === 0) {
-        const mediumChunks = allChunks.slice(-MEDIUM_FROM_CHUNKS);
-        newMedium = await computeMedium(mediumChunks, char, sumCfg, Math.min(maxTok, 4096));
+        const fromIdx      = totalChunks - MEDIUM_FROM_CHUNKS;
+        const mediumChunks = allChunks.slice(fromIdx);
+        try {
+            newMedium = await computeMedium(mediumChunks, char, sumCfg, Math.min(maxTok, 4096), fromIdx);
+        } catch (e) {
+            if (isProhibitedContent(e)) { console.warn('[Summary] Medium skipped — prohibited content:', e.message); }
+            else throw e;
+        }
 
-        const allMediums  = [...(state.medium || []), newMedium];
-        if (allMediums.length % GLOBAL_FROM_MEDIUMS === 0) {
-            newGlobal = await computeGlobal(allMediums, char, sumCfg, maxTok);
+        if (newMedium) {
+            const allMediums = [...(state.medium || []), newMedium];
+            if (allMediums.length % GLOBAL_FROM_MEDIUMS === 0) {
+                try {
+                    newGlobal = await computeGlobal(allMediums, char, sumCfg, maxTok);
+                } catch (e) {
+                    if (isProhibitedContent(e)) { console.warn('[Summary] Global skipped — prohibited content:', e.message); }
+                    else throw e;
+                }
+            }
         }
     }
 
-    return { newChunk, newMedium, newGlobal };
+    return { newChunk, newMedium, newGlobal, newProhibitedIds };
 }
 
 // ============ RETRY ============
@@ -497,20 +530,24 @@ function renderMessages() {
         return;
     }
 
+    const prohibitedIds = new Set(currentChatSummary?.prohibitedMsgIds ?? []);
+
     container.innerHTML = currentMessages.map(msg => {
-        const isUser = msg.role === 'user';
+        const isUser      = msg.role === 'user';
+        const isProhibited = prohibitedIds.has(msg.id);
         const time   = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const seqLabel = msg.seqId != null ? `<span class="msg-seq-id" title="Message #${msg.seqId}">#${msg.seqId}</span> ` : '';
+        const prohibBadge = isProhibited ? `<span class="msg-prohibited-badge" title="Ta wiadomość jest wykluczona z podsumowania (prohibited content)">⚠ prohibited</span> ` : '';
         const avatarHtml = (!isUser && currentCharacterAvatarUrl)
             ? `<img src="${currentCharacterAvatarUrl}" class="msg-avatar-thumb" onclick="app.openImageLightbox()" title="Kliknij aby powiększyć" alt="avatar">`
             : '';
         return `
-            <div class="message ${isUser ? 'user' : 'ai'}" data-msg-id="${msg.id}">
+            <div class="message ${isUser ? 'user' : 'ai'}${isProhibited ? ' msg-prohibited' : ''}" data-msg-id="${msg.id}">
                 <div class="message-wrapper">
                     ${avatarHtml}
                     <div>
                         <div class="message-content">${parseMessageMarkup(msg.content)}</div>
-                        <div class="message-time">${seqLabel}${time}</div>
+                        <div class="message-time">${seqLabel}${prohibBadge}${time}</div>
                     </div>
                     <button class="message-delete-btn"
                             onclick="app.deleteMessageFrom(${msg.id})"
@@ -651,7 +688,7 @@ async function refreshMemory() {
 // ============ DELETE MESSAGE ============
 async function deleteMessageFrom(msgId) {
     if (!confirm('Delete this message and all messages after it?')) return;
-    const { remaining, deletedSeqIds } = await deleteMessagesFrom(currentChat.id, msgId);
+    const { remaining, deletedSeqIds, deletedIds } = await deleteMessagesFrom(currentChat.id, msgId);
     currentMessages = remaining;
 
     if (deletedSeqIds.length) {
@@ -670,7 +707,14 @@ async function deleteMessageFrom(msgId) {
     // Keep only rolling (recomputed from remaining); discard chunks/medium/global.
     const sumCfg = getProviderConfig('summary');
     const maxTok = getTaskCfg('summary').maxTokens ?? 8192;
-    const freshState = { chatId: currentChat.id, rolling: null, chunks: [], medium: [], global: null };
+    // Preserve surviving prohibited IDs after deletion; discard chunk/medium/global (stale).
+    const survivingProhibitedIds = (currentChatSummary?.prohibitedMsgIds ?? [])
+        .filter(id => !(deletedIds ?? []).includes(id));
+    const freshState = {
+        chatId: currentChat.id,
+        rolling: null, chunks: [], medium: [], global: null,
+        prohibitedMsgIds: survivingProhibitedIds,
+    };
 
     if (remaining.length >= 2) {
         try {
@@ -680,7 +724,7 @@ async function deleteMessageFrom(msgId) {
             );
             if (computedRolling) freshState.rolling = computedRolling;
         } catch (e) {
-            console.warn('[Summary] Rebuild after delete failed:', e.message);
+            if (!isProhibitedContent(e)) console.warn('[Summary] Rebuild after delete failed:', e.message);
         }
     }
 
@@ -792,74 +836,9 @@ function editCharacterFromList(charId) {
 }
 
 // ============ SUMMARY ============
-async function generateSummary() {
-    if (!currentMessages.length) { showToast('No messages to summarize', 'error'); return; }
-    if (!currentChat)            { showToast('No chat selected', 'error');          return; }
-    const sumCfg = getProviderConfig('summary');
-
-    const summaryContent = document.getElementById('summary-content');
-    const infoEl         = document.getElementById('summary-info');
-    if (summaryContent) {
-        summaryContent.innerHTML = `
-            <div class="summary-loading">
-                <div class="typing-indicator">
-                    <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
-                </div>
-                <p>Generating summary…</p>
-            </div>`;
-    }
-    if (infoEl) infoEl.textContent = '';
-    openModal('summary-modal');
-
-    try {
-        const newState = await generateAndSaveSummary(
-            currentChat.id, currentMessages, currentCharacter, currentChatSummary,
-            sumCfg, getTaskCfg('summary').maxTokens ?? 8192
-        );
-        currentChatSummary = newState;
-        const contextText  = buildSummaryContext(newState);
-        const displayText  = newState.rolling?.text || contextText || '(brak treści)';
-
-        if (summaryContent) {
-            // Show rolling summary prominently + collapsible full context
-            let html = `<pre style="white-space:pre-wrap;word-wrap:break-word;font-size:13px;line-height:1.6">${escapeHtml(displayText)}</pre>`;
-            if (contextText) {
-                html += `<details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;color:var(--text-secondary)">Pełny kontekst historyczny (${newState.chunks.length} okien, ${newState.medium.length} pośrednich)</summary>
-<pre style="white-space:pre-wrap;font-size:11px;line-height:1.5;margin-top:8px;color:var(--text-secondary)">${escapeHtml(contextText)}</pre></details>`;
-            }
-            summaryContent.innerHTML = html;
-        }
-        if (infoEl) {
-            const parts = [`Rolling: ostatnie ≤${50} wiadomości`];
-            if (newState.chunks.length)  parts.push(`${newState.chunks.length} okien szczegółowych`);
-            if (newState.medium.length)  parts.push(`${newState.medium.length} podsumowań pośrednich`);
-            if (newState.global)         parts.push('podsumowanie globalne');
-            infoEl.textContent = parts.join(' · ');
-        }
-        // keep currentSummary for copy
-        currentSummary = displayText;
-    } catch (err) {
-        closeModal('summary-modal');
-        showToast(err.message, 'error');
-    }
-}
-
-async function clearChatSummary() {
-    if (!currentChat) return;
-    if (!confirm('Delete the saved summary for this chat?')) return;
-    await deleteSummaryForChat(currentChat.id);
-    currentChatSummary = null;
-    showToast('Summary cleared', 'success');
-}
-
-async function copySummary() {
-    if (!currentSummary) return;
-    try {
-        await navigator.clipboard.writeText(currentSummary);
-        showToast('Copied to clipboard', 'success');
-    } catch {
-        showToast('Copy failed', 'error');
-    }
+function generateSummary() {
+    if (!currentChat) { showToast('No chat selected', 'error'); return; }
+    window.location.href = `summary.html?chatId=${currentChat.id}`;
 }
 
 // ============ EXPORT / IMPORT ============
@@ -941,9 +920,6 @@ window.app = {
     refreshMemory,
 
     generateSummary,
-    clearChatSummary,
-    closeSummaryModal:        () => closeModal('summary-modal'),
-    copySummary,
 
     exportCurrentChat:        handleExportChat,
     importChat:               handleImportChat,
@@ -970,11 +946,6 @@ window.app = {
         applyChatFontSize(size);
     },
 
-    retryLastMessage: () => {
-        if (lastFailedMessage) { hideRetryBar(); appSendMessage(lastFailedMessage); }
-    },
-    dismissRetry: () => { lastFailedMessage = null; hideRetryBar(); },
-
     retryLastMessage() {
         if (!lastFailedMessage) return;
         const msg = lastFailedMessage;
@@ -982,6 +953,8 @@ window.app = {
         currentChatError  = null;
         appSendMessage(msg);
     },
+
+    dismissRetry: () => { lastFailedMessage = null; hideRetryBar(); },
 
     dismissChatError() {
         currentChatError = null;

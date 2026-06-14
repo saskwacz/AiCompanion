@@ -197,33 +197,6 @@
     </div>
 </div>
 
-<!-- SUMMARY MODAL -->
-<div class="modal" id="summary-modal">
-    <div class="modal-content wide-modal">
-        <div class="modal-header">
-            <h2>Chat Summary</h2>
-            <button class="close-btn" onclick="app.closeSummaryModal()">&#10005;</button>
-        </div>
-        <div class="modal-body" id="summary-content">
-            <div class="summary-loading">
-                <div class="typing-indicator">
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                </div>
-                <p>Generating...</p>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <span id="summary-info" class="summary-info"></span>
-            <div class="footer-spacer"></div>
-            <button class="btn-secondary small" onclick="app.clearChatSummary(); app.closeSummaryModal()">&#128465; Clear saved</button>
-            <button class="btn-secondary" onclick="app.copySummary()">&#128203; Copy</button>
-            <button class="btn-secondary" onclick="app.closeSummaryModal()">Close</button>
-        </div>
-    </div>
-</div>
-
 <script type="module" src="scripts/main.js"></script>
 
 <!-- IMAGE LIGHTBOX -->
