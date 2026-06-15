@@ -83,64 +83,171 @@ export function isProhibitedContent(err) {
     return /PROHIBITED|blocked by Gemini|SAFETY|RECITATION/i.test(err?.message ?? '');
 }
 
-// ─── Fallback compute wrappers ────────────────────────────────────────────────
-/**
- * Rolling fallback: on PROHIBITED shrink window from the oldest end,
- * halving each time. Returns null only if even a minimal window fails.
- */
-export async function computeRollingFallback(msgs, char, cfg, maxTok) {
-    const MIN_WINDOW = 5;
-    let win = msgs;
-    while (win.length >= MIN_WINDOW) {
-        try {
-            return await computeRolling(win, char, cfg, maxTok);
-        } catch (e) {
-            if (!isProhibitedContent(e)) throw e;
-            const next = win.slice(Math.ceil(win.length / 2));
-            console.warn(`[Summary] Rolling fallback: shrink ${win.length} → ${next.length}`);
-            win = next;
-        }
-    }
-    return null;
+// ─── Key rotator (distributes binary-search calls across available API keys) ──
+function _makeKeyRotator(keys) {
+    const pool = (Array.isArray(keys) ? [...keys] : [keys]).filter(Boolean);
+    if (!pool.length) return () => keys; // passthrough if empty
+    // Shuffle so different calls start from different positions
+    pool.sort(() => Math.random() - 0.5);
+    let idx = 0;
+    return () => pool[idx++ % pool.length];
 }
 
 /**
- * Chunk fallback: on PROHIBITED split in halves recursively (up to MAX_DEPTH).
- * Returns { chunks: ChunkObj[], prohibited: number[] (msg IDs) }
- * Multiple sub-chunks are combined into a single entry.
+ * Test whether a set of messages can be summarized without PROHIBITED error.
+ * Uses computeChunk as the oracle (works for arbitrary subsets).
+ * Returns true = OK, false = prohibited, throws on other errors.
  */
-export async function computeChunkFallback(msgs, char, cfg, maxTok, depth = 0) {
-    const MAX_DEPTH = 2;
-    const MIN_MSGS  = 5;
+async function _testSubset(msgs, char, cfg, maxTok) {
+    try {
+        await computeChunk(msgs, char, cfg, maxTok);
+        return true;
+    } catch (e) {
+        if (isProhibitedContent(e)) return false;
+        throw e;
+    }
+}
+
+/**
+ * Binary search within msgs to identify which specific messages trigger
+ * PROHIBITED CONTENT. Each recursive call uses the next key from nextKey()
+ * to distribute load across available API keys.
+ *
+ * Returns an array of message IDs that are problematic.
+ */
+async function _findProhibitedMsgs(msgs, char, cfg, maxTok, nextKey, depth = 0) {
+    const MAX_DEPTH = 10; // log2(1024) = 10, covers up to 1024 messages
+    if (msgs.length === 0) return [];
+    // Base case: single message is the culprit
+    if (msgs.length === 1) {
+        console.warn(`[Summary] Found prohibited message: id=${msgs[0].id} seq=${msgs[0].seqId}`);
+        return [msgs[0].id];
+    }
+    // Safety: stop splitting if too deep
+    if (depth >= MAX_DEPTH) {
+        console.warn(`[Summary] Binary search max depth reached — marking ${msgs.length} msgs`);
+        return msgs.map(m => m.id);
+    }
+
+    const mid    = Math.floor(msgs.length / 2);
+    const first  = msgs.slice(0, mid);
+    const second = msgs.slice(mid);
+
+    // Test each half with a different key to stay within per-minute quota
+    const firstOk  = await _testSubset(first,  char, { ...cfg, keys: nextKey() }, maxTok);
+    const secondOk = await _testSubset(second, char, { ...cfg, keys: nextKey() }, maxTok);
+
+    const prohibited = [];
+    if (!firstOk)  prohibited.push(...await _findProhibitedMsgs(first,  char, cfg, maxTok, nextKey, depth + 1));
+    if (!secondOk) prohibited.push(...await _findProhibitedMsgs(second, char, cfg, maxTok, nextKey, depth + 1));
+
+    // Fallback: if both halves pass but full set fails (rare edge), mark the boundary
+    if (prohibited.length === 0) {
+        console.warn('[Summary] Binary search inconclusive — marking junction message');
+        return [msgs[mid].id];
+    }
+    return prohibited;
+}
+
+// ─── Fallback compute wrappers ────────────────────────────────────────────────
+/**
+ * Rolling fallback with binary-search identification of prohibited messages.
+ *
+ * Returns { rolling: RollingObj|null, prohibitedIds: number[] }
+ *
+ * Strategy:
+ *   1. Try full window → if OK, return immediately.
+ *   2. Assume last message is the culprit — try without it.
+ *   3. If still failing → binary-search the full window.
+ *   4. Filter out the found prohibited IDs and retry rolling.
+ *   5. If still failing (multiple bad messages) → return rolling=null.
+ */
+export async function computeRollingFallback(msgs, char, cfg, maxTok) {
+    // 1. Try the full window
+    try {
+        const rolling = await computeRolling(msgs, char, cfg, maxTok);
+        return { rolling, prohibitedIds: [] };
+    } catch (e) {
+        if (!isProhibitedContent(e)) throw e;
+    }
+
+    const nextKey = _makeKeyRotator(cfg.keys);
+
+    // 2. Try without the last message (the most likely culprit in a rolling window)
+    if (msgs.length > 1) {
+        const withoutLast = msgs.slice(0, -1);
+        try {
+            const rolling = await computeRolling(withoutLast, char, { ...cfg, keys: nextKey() }, maxTok);
+            const lastId  = msgs.at(-1).id;
+            console.warn(`[Summary] Rolling: last message (id=${lastId}) is prohibited`);
+            return { rolling, prohibitedIds: [lastId] };
+        } catch (e) {
+            if (!isProhibitedContent(e)) throw e;
+        }
+    }
+
+    // 3. Binary-search the full window to pinpoint all prohibited messages
+    console.warn(`[Summary] Rolling: binary-searching ${msgs.length} messages for prohibited content`);
+    const prohibitedIds = await _findProhibitedMsgs(msgs, char, cfg, maxTok, nextKey);
+
+    if (!prohibitedIds.length) return { rolling: null, prohibitedIds: [] };
+
+    // 4. Retry rolling with all prohibited messages filtered out
+    const clean = msgs.filter(m => !prohibitedIds.includes(m.id));
+    if (clean.length >= 3) {
+        try {
+            const rolling = await computeRolling(clean, char, { ...cfg, keys: nextKey() }, maxTok);
+            return { rolling, prohibitedIds };
+        } catch (e) {
+            if (!isProhibitedContent(e)) throw e;
+        }
+    }
+
+    return { rolling: null, prohibitedIds };
+}
+
+/**
+ * Chunk fallback with binary-search identification of prohibited messages.
+ *
+ * Returns { chunks: ChunkObj[], prohibited: number[] (msg IDs) }
+ *
+ * Strategy:
+ *   1. Try full chunk → if OK, return immediately.
+ *   2. Binary-search to find the specific prohibited message(s).
+ *   3. Filter those out and retry computing the chunk.
+ *   4. If the clean chunk still fails, return chunks=[] (give up on this window).
+ */
+export async function computeChunkFallback(msgs, char, cfg, maxTok) {
+    // 1. Try the full chunk
     try {
         const chunk = await computeChunk(msgs, char, cfg, maxTok);
         return { chunks: [chunk], prohibited: [] };
     } catch (e) {
         if (!isProhibitedContent(e)) throw e;
-        if (depth >= MAX_DEPTH || msgs.length <= MIN_MSGS) {
-            console.warn(`[Summary] L1 fallback exhausted (${msgs.length} msgs) — marking prohibited`);
-            return { chunks: [], prohibited: msgs.map(m => m.id) };
-        }
-        const mid = Math.ceil(msgs.length / 2);
-        console.warn(`[Summary] L1 fallback: split ${msgs.length} msgs at ${mid}`);
-        const [r1, r2] = await Promise.all([
-            computeChunkFallback(msgs.slice(0, mid), char, cfg, maxTok, depth + 1),
-            computeChunkFallback(msgs.slice(mid),    char, cfg, maxTok, depth + 1),
-        ]);
-        const allChunks     = [...r1.chunks, ...r2.chunks];
-        const allProhibited = [...r1.prohibited, ...r2.prohibited];
-        if (allChunks.length > 1) {
-            const combined = {
-                id:        `chunk-${Date.now()}`,
-                text:      allChunks.map(c => c.text).join('\n\n'),
-                fromMsg:   msgs[0].seqId,
-                toMsg:     msgs.at(-1).seqId,
-                createdAt: Date.now(),
-            };
-            return { chunks: [combined], prohibited: allProhibited };
-        }
-        return { chunks: allChunks, prohibited: allProhibited };
     }
+
+    // 2. Binary-search to identify the problematic messages
+    console.warn(`[Summary] L1: binary-searching ${msgs.length} messages for prohibited content`);
+    const nextKey       = _makeKeyRotator(cfg.keys);
+    const prohibitedIds = await _findProhibitedMsgs(msgs, char, cfg, maxTok, nextKey);
+
+    if (!prohibitedIds.length) return { chunks: [], prohibited: [] };
+
+    // 3. Retry chunk with prohibited messages removed
+    const clean = msgs.filter(m => !prohibitedIds.includes(m.id));
+    if (clean.length >= 3) {
+        try {
+            const chunk = await computeChunk(clean, char, { ...cfg, keys: nextKey() }, maxTok);
+            return { chunks: [chunk], prohibited: prohibitedIds };
+        } catch (e) {
+            if (!isProhibitedContent(e)) throw e;
+            // Even the clean set failed — expand the prohibited list via another pass
+            const extraIds = await _findProhibitedMsgs(clean, char, cfg, maxTok, nextKey);
+            return { chunks: [], prohibited: [...prohibitedIds, ...extraIds] };
+        }
+    }
+
+    return { chunks: [], prohibited: prohibitedIds };
 }
 
 // ─── Context builder for chat system prompt ───────────────────────────────────

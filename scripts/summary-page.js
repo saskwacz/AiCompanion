@@ -12,7 +12,8 @@ import { GEMINI_DEFAULTS }                              from './providers/gemini
 import {
     getSummaryState, saveSummaryState, deleteSummaryForChat,
     computeMedium, computeGlobal,
-    isProhibitedContent, computeRollingFallback, computeChunkFallback,
+    isProhibitedContent,
+    computeRollingFallback, computeChunkFallback,
     CHUNK_SIZE, MEDIUM_FROM_CHUNKS,
 } from './summary.js';
 import { escapeHtml, showToast }                        from './ui.js';
@@ -134,28 +135,35 @@ async function runBuild() {
         prohibitedMsgIds: [...(sumState.prohibitedMsgIds ?? [])],
     };
 
-    const prohibitedIds = new Set(newState.prohibitedMsgIds);
-    const filteredMsgs  = msgs.filter(m => !prohibitedIds.has(m.id));
-
     try {
         // ── Rolling ──
         setContent(loadingHtml('Obliczam rolling summary…'));
-        try {
-            const r = await computeRollingFallback(msgs, charData, sumCfg, Math.min(maxTok, 4096));
-            if (r) { newState.rolling = r; await saveSummaryState(newState); }
-        } catch (e) {
-            if (!isProhibitedContent(e)) throw e;
-            console.warn('[SummaryPage] Rolling skipped — prohibited');
+        const { rolling: computedRolling, prohibitedIds: rollingProhibited } =
+            await computeRollingFallback(msgs, charData, sumCfg, Math.min(maxTok, 4096));
+        if (computedRolling) {
+            newState.rolling = computedRolling;
         }
+        if (rollingProhibited?.length) {
+            const existing = new Set(newState.prohibitedMsgIds);
+            rollingProhibited.forEach(id => existing.add(id));
+            newState.prohibitedMsgIds = [...existing];
+        }
+        if (computedRolling || rollingProhibited?.length) await saveSummaryState(newState);
 
-        // ── L1 chunks ──
-        const totalExpected = Math.floor(filteredMsgs.length / CHUNK_SIZE);
+        // ── L1 chunks ── (re-filter with updated prohibited list)
+        const prohibitedSet   = new Set(newState.prohibitedMsgIds);
+        const filteredMsgs2   = msgs.filter(m => !prohibitedSet.has(m.id));
+        const totalExpected   = Math.floor(filteredMsgs2.length / CHUNK_SIZE);
         for (let i = newState.chunks.length; i < totalExpected; i++) {
             setContent(loadingHtml(`Okno L1 ${i + 1} / ${totalExpected}…`));
-            const slice = filteredMsgs.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+            const slice = filteredMsgs2.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
             const { chunks: fc, prohibited: np } =
                 await computeChunkFallback(slice, charData, sumCfg, Math.min(maxTok, 4096));
-            if (np.length) newState.prohibitedMsgIds = [...newState.prohibitedMsgIds, ...np];
+            if (np?.length) {
+                const ex = new Set(newState.prohibitedMsgIds);
+                np.forEach(id => ex.add(id));
+                newState.prohibitedMsgIds = [...ex];
+            }
             if (fc.length) { newState.chunks.push(fc[0]); await saveSummaryState(newState); }
         }
 

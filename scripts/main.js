@@ -14,7 +14,7 @@ import { getMemoryForChat, computeMemoryUpdate, persistMemory,
 import { getSummaryState, saveSummaryState, deleteSummaryForChat,
          buildSummaryContext,
          computeRolling, computeChunk, computeMedium, computeGlobal,
-         shouldBuildChunk, markMsgProhibited, cleanProhibitedIds,
+         shouldBuildChunk,
          isProhibitedContent,
          computeRollingFallback, computeChunkFallback,
          CHUNK_SIZE, MEDIUM_FROM_CHUNKS, GLOBAL_FROM_MEDIUMS,
@@ -374,8 +374,7 @@ async function appSendMessage(retryText) {
         const maxTok  = getTaskCfg('summary').maxTokens ?? 8192;
         const doChunk = shouldBuildChunk(msgs, currentChatSummary);
 
-        let rollingProhibited = false;
-        const [computedMem, computedRolling, computedHistoryTiers] = await Promise.all([
+        const [computedMem, rollingResult, computedHistoryTiers] = await Promise.all([
             computeMemoryUpdate(
                 chatId, message, response, memCfg,
                 char, msgs,
@@ -383,8 +382,7 @@ async function appSendMessage(retryText) {
                 null,
                 embedCfg
             ),
-            computeRollingFallback(msgs, char, sumCfg, Math.min(maxTok, 4096))
-                .then(r => { if (r === null) rollingProhibited = true; return r; }),
+            computeRollingFallback(msgs, char, sumCfg, Math.min(maxTok, 4096)),
             doChunk
                 ? _computeHistoryTiers(state, msgs, char, sumCfg, maxTok)
                 : null,
@@ -397,19 +395,22 @@ async function appSendMessage(retryText) {
         await persistMemory(computedMem);
 
         let newState = { ...state };
+        const { rolling: computedRolling, prohibitedIds: rollingProhibitedIds } = rollingResult;
         if (computedRolling) newState.rolling = computedRolling;
-        // If rolling failed due to prohibited content, mark the AI message
-        if (rollingProhibited) newState = markMsgProhibited(newState, aiMsg.id);
+        if (rollingProhibitedIds?.length) {
+            const existing = new Set(newState.prohibitedMsgIds ?? []);
+            rollingProhibitedIds.forEach(id => existing.add(id));
+            newState.prohibitedMsgIds = [...existing];
+        }
         if (computedHistoryTiers) {
             const { newChunk, newMedium, newGlobal, newProhibitedIds } = computedHistoryTiers;
             if (newChunk)  newState.chunks = [...(state.chunks || []), newChunk];
             if (newMedium) newState.medium = [...(state.medium || []), newMedium];
             if (newGlobal) newState.global  = newGlobal;
             if (newProhibitedIds?.length) {
-                newState.prohibitedMsgIds = [
-                    ...(newState.prohibitedMsgIds || []),
-                    ...newProhibitedIds,
-                ];
+                const existing = new Set(newState.prohibitedMsgIds ?? []);
+                newProhibitedIds.forEach(id => existing.add(id));
+                newState.prohibitedMsgIds = [...existing];
             }
         }
         await saveSummaryState(newState);
