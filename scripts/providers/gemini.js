@@ -381,6 +381,7 @@ export async function callGeminiForMemory({ prompt, apiKey, maxOutputTokens = 81
                 responseMimeType: 'application/json',
                 thinkingConfig:   { thinkingBudget: 0 },
             },
+            safetySettings: SAFETY_NONE,
         });
 
         if (data.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
