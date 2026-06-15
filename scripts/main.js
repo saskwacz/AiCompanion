@@ -404,7 +404,10 @@ async function appSendMessage(retryText) {
         }
         if (computedHistoryTiers) {
             const { newChunk, newMedium, newGlobal, newProhibitedIds } = computedHistoryTiers;
-            if (newChunk)  newState.chunks = [...(state.chunks || []), newChunk];
+            if (newChunk) {
+                const unsorted = [...(state.chunks || []), newChunk];
+                newState.chunks = unsorted.sort((a, b) => (a.fromMsg ?? 0) - (b.fromMsg ?? 0));
+            }
             if (newMedium) newState.medium = [...(state.medium || []), newMedium];
             if (newGlobal) newState.global  = newGlobal;
             if (newProhibitedIds?.length) {

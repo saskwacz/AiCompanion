@@ -118,11 +118,19 @@ async function _testSubset(msgs, char, cfg, maxTok) {
 async function _findProhibitedMsgs(msgs, char, cfg, maxTok, nextKey, depth = 0) {
     const MAX_DEPTH = 10; // log2(1024) = 10, covers up to 1024 messages
     if (msgs.length === 0) return [];
-    // Base case: single message is the culprit
+
+    // Base case: test the single message directly
     if (msgs.length === 1) {
-        console.warn(`[Summary] Found prohibited message: id=${msgs[0].id} seq=${msgs[0].seqId}`);
-        return [msgs[0].id];
+        const ok = await _testSubset(msgs, char, { ...cfg, keys: nextKey() }, maxTok);
+        if (!ok) {
+            console.warn(`[Summary] Found prohibited message: id=${msgs[0].id} seq=${msgs[0].seqId}`);
+            return [msgs[0].id];
+        }
+        // Single message passes on its own — prohibited content comes from combination
+        // (very rare); caller should mark the junction instead
+        return [];
     }
+
     // Safety: stop splitting if too deep
     if (depth >= MAX_DEPTH) {
         console.warn(`[Summary] Binary search max depth reached — marking ${msgs.length} msgs`);
@@ -141,10 +149,11 @@ async function _findProhibitedMsgs(msgs, char, cfg, maxTok, nextKey, depth = 0) 
     if (!firstOk)  prohibited.push(...await _findProhibitedMsgs(first,  char, cfg, maxTok, nextKey, depth + 1));
     if (!secondOk) prohibited.push(...await _findProhibitedMsgs(second, char, cfg, maxTok, nextKey, depth + 1));
 
-    // Fallback: if both halves pass but full set fails (rare edge), mark the boundary
+    // If both halves pass individually but the combined set fails, the issue is
+    // likely in the context interaction at the boundary — mark the junction message.
     if (prohibited.length === 0) {
         console.warn('[Summary] Binary search inconclusive — marking junction message');
-        return [msgs[mid].id];
+        return [msgs[mid - 1].id]; // last message of first half (the boundary)
     }
     return prohibited;
 }

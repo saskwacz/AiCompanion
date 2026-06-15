@@ -610,7 +610,8 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
 .sum-tier-label--warn {
     color: var(--warning, #d97706);
 }
-.sum-tier-label--warn .sum-tier-badge {
+.sum-tier-label--warn .sum-tier-badge,
+.sum-tier-badge--warn {
     background: color-mix(in srgb, #d97706 12%, transparent);
     border-color: color-mix(in srgb, #d97706 30%, transparent);
     color: #d97706;
