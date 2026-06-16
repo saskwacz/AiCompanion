@@ -9,8 +9,10 @@ import { GEMINI_DEFAULTS }      from './providers/gemini-models.js';
 import { MISTRAL_DEFAULTS }     from './providers/mistral-models.js';
 import { GROQ_DEFAULTS }        from './providers/groq-models.js';
 import { OPENROUTER_DEFAULTS }  from './providers/openrouter-models.js';
+import { OPENAI_DEFAULTS }      from './providers/openai-models.js';
+import { CLAUDE_DEFAULTS }      from './providers/claude-models.js';
 
-export { GEMINI_DEFAULTS, MISTRAL_DEFAULTS, GROQ_DEFAULTS, OPENROUTER_DEFAULTS };
+export { GEMINI_DEFAULTS, MISTRAL_DEFAULTS, GROQ_DEFAULTS, OPENROUTER_DEFAULTS, OPENAI_DEFAULTS, CLAUDE_DEFAULTS };
 
 const TASKS = ['chat', 'memory', 'summary', 'embed'];
 
@@ -95,14 +97,16 @@ export function resolveChatConfig(chat) {
     if (!chat?.config) return buildDefaultChatConfig();
     const stored = migrateConfig(chat.config) || {};
     return {
-        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,    ...OPENROUTER_DEFAULTS.chat,    ...(stored.chat    || {}) },
-        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,  ...OPENROUTER_DEFAULTS.memory,  ...(stored.memory  || {}) },
-        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary, ...OPENROUTER_DEFAULTS.summary, ...(stored.summary || {}) },
-        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,   ...OPENROUTER_DEFAULTS.embed,   ...(stored.embed   || {}) },
+        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,    ...OPENROUTER_DEFAULTS.chat,    ...OPENAI_DEFAULTS.chat,    ...CLAUDE_DEFAULTS.chat,    ...(stored.chat    || {}) },
+        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,  ...OPENROUTER_DEFAULTS.memory,  ...OPENAI_DEFAULTS.memory,  ...CLAUDE_DEFAULTS.memory,  ...(stored.memory  || {}) },
+        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary, ...OPENROUTER_DEFAULTS.summary, ...OPENAI_DEFAULTS.summary, ...CLAUDE_DEFAULTS.summary, ...(stored.summary || {}) },
+        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,   ...OPENROUTER_DEFAULTS.embed,   ...OPENAI_DEFAULTS.embed,   ...CLAUDE_DEFAULTS.embed,   ...(stored.embed   || {}) },
         apiKeys:           stored.apiKeys           || [],
         mistralApiKeys:    stored.mistralApiKeys    || [],
         groqApiKeys:       stored.groqApiKeys       || [],
         openrouterApiKeys: stored.openrouterApiKeys || [],
+        openaiApiKeys:     stored.openaiApiKeys     || [],
+        claudeApiKeys:     stored.claudeApiKeys     || [],
         ollamaBaseUrl:     stored.ollamaBaseUrl     || 'http://localhost:11434',
         chatLang:          stored.chatLang          || 'pl',
     };
@@ -111,16 +115,18 @@ export function resolveChatConfig(chat) {
 /**
  * Build a fresh chat config seeded with global API keys / Ollama URL.
  */
-export function buildDefaultChatConfig(globalApiKeys = [], ollamaBaseUrl = 'http://localhost:11434', globalMistralApiKeys = [], globalGroqApiKeys = [], globalOpenRouterApiKeys = []) {
+export function buildDefaultChatConfig(globalApiKeys = [], ollamaBaseUrl = 'http://localhost:11434', globalMistralApiKeys = [], globalGroqApiKeys = [], globalOpenRouterApiKeys = [], globalOpenaiApiKeys = [], globalClaudeApiKeys = []) {
     return {
-        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,    ...OPENROUTER_DEFAULTS.chat },
-        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,  ...OPENROUTER_DEFAULTS.memory },
-        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary, ...OPENROUTER_DEFAULTS.summary },
-        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,   ...OPENROUTER_DEFAULTS.embed },
+        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,    ...OPENROUTER_DEFAULTS.chat,    ...OPENAI_DEFAULTS.chat,    ...CLAUDE_DEFAULTS.chat },
+        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,  ...OPENROUTER_DEFAULTS.memory,  ...OPENAI_DEFAULTS.memory,  ...CLAUDE_DEFAULTS.memory },
+        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary, ...OPENROUTER_DEFAULTS.summary, ...OPENAI_DEFAULTS.summary, ...CLAUDE_DEFAULTS.summary },
+        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,   ...OPENROUTER_DEFAULTS.embed,   ...OPENAI_DEFAULTS.embed,   ...CLAUDE_DEFAULTS.embed },
         apiKeys:           [...(globalApiKeys           || [])],
         mistralApiKeys:    [...(globalMistralApiKeys    || [])],
         groqApiKeys:       [...(globalGroqApiKeys       || [])],
         openrouterApiKeys: [...(globalOpenRouterApiKeys || [])],
+        openaiApiKeys:     [...(globalOpenaiApiKeys     || [])],
+        claudeApiKeys:     [...(globalClaudeApiKeys     || [])],
         ollamaBaseUrl:     ollamaBaseUrl || 'http://localhost:11434',
         chatLang:          'pl',
     };
@@ -137,5 +143,7 @@ export function resolveModel(taskCfg) {
     if (provider === 'mistral')  return taskCfg.mistralModel || null;
     if (provider === 'groq')        return taskCfg.groqModel        || null;
     if (provider === 'openrouter')  return taskCfg.openrouterModel  || null;
+    if (provider === 'openai')      return taskCfg.openaiModel      || null;
+    if (provider === 'claude')      return taskCfg.claudeModel      || null;
     return taskCfg.geminiModel || null;
 }

@@ -8,7 +8,7 @@
  * getProviderConfig() in main.js:
  *
  *   {
- *     provider:  'gemini' | 'ollama' | 'mistral' | 'groq' | 'openrouter'
+ *     provider:  'gemini' | 'ollama' | 'mistral' | 'groq' | 'openrouter' | 'openai' | 'claude'
  *     keys:      [{label, key}, …]     // Gemini/Mistral API keys (ignored for Ollama)
  *     ollamaUrl: 'http://…'            // Ollama base URL (ignored for Gemini/Mistral)
  *     model:     'model-id' | null     // per-role model override (null = provider default)
@@ -44,6 +44,42 @@ import {
     buildSummaryPrompt      as geminiBuildSummaryPrompt,
     selectChatMessages      as geminiSelectChatMessages,
 } from './gemini-prompts.js';
+
+// ─── Claude (Anthropic) ────────────────────────────────────────────────────────
+import {
+    callClaudeAPI,
+    callClaudeForMemory,
+    callClaudeForSummary,
+    embedText       as claudeEmbedText,
+    embedContents   as claudeEmbedContents,
+    parseMemoryJson as claudeParseMemoryJson,
+} from './claude.js';
+
+import {
+    buildSystemPrompt       as claudeBuildSystemPrompt,
+    buildMemoryUpdatePrompt as claudeBuildMemoryUpdatePrompt,
+    buildMemorySeedPrompt   as claudeBuildMemorySeedPrompt,
+    buildSummaryPrompt      as claudeBuildSummaryPrompt,
+    selectChatMessages      as claudeSelectChatMessages,
+} from './claude-prompts.js';
+
+// ─── OpenAI ────────────────────────────────────────────────────────────────────
+import {
+    callOpenAIAPI,
+    callOpenAIForMemory,
+    callOpenAIForSummary,
+    embedText       as openaiEmbedText,
+    embedContents   as openaiEmbedContents,
+    parseMemoryJson as openaiParseMemoryJson,
+} from './openai.js';
+
+import {
+    buildSystemPrompt       as openaiBuildSystemPrompt,
+    buildMemoryUpdatePrompt as openaiBuildMemoryUpdatePrompt,
+    buildMemorySeedPrompt   as openaiBuildMemorySeedPrompt,
+    buildSummaryPrompt      as openaiBuildSummaryPrompt,
+    selectChatMessages      as openaiSelectChatMessages,
+} from './openai-prompts.js';
 
 // ─── OpenRouter ────────────────────────────────────────────────────────────────
 import {
@@ -145,6 +181,50 @@ const PROVIDERS = {
         buildMemorySeedPrompt:   (lang, character) => geminiBuildMemorySeedPrompt(lang, character),
         buildSummaryPrompt:      (lang, opts) => geminiBuildSummaryPrompt(lang, opts),
         selectChatMessages:      geminiSelectChatMessages,
+    },
+
+    openai: {
+        callChat: ({ messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, keys, model, modelFallback }) =>
+            callOpenAIAPI({ apiKey: keys, messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, chatModel: model, chatModelFallback: modelFallback }),
+
+        callMemory: ({ prompt, maxOutputTokens, keys, priority, model, modelFallback }) =>
+            callOpenAIForMemory({ prompt, apiKey: keys, maxOutputTokens, priority, memoryModel: model, memoryModelFallback: modelFallback }),
+
+        callSummary: ({ prompt, maxOutputTokens, keys, model, modelFallback }) =>
+            callOpenAIForSummary({ prompt, apiKey: keys, maxOutputTokens, summaryModel: model, summaryModelFallback: modelFallback }),
+
+        embedText:     ({ text, keys, model })  => openaiEmbedText({ text, apiKey: keys, embedModel: model }),
+        embedContents: ({ texts, keys, model }) => openaiEmbedContents({ texts, apiKey: keys, embedModel: model }),
+
+        parseMemoryJson: openaiParseMemoryJson,
+
+        buildSystemPrompt:       (lang, character, memCtx) => openaiBuildSystemPrompt(lang, character, memCtx),
+        buildMemoryUpdatePrompt: (lang, existing, character, recentMessages, userMsg, aiMsg) => openaiBuildMemoryUpdatePrompt(lang, existing, character, recentMessages, userMsg, aiMsg),
+        buildMemorySeedPrompt:   (lang, character) => openaiBuildMemorySeedPrompt(lang, character),
+        buildSummaryPrompt:      (lang, opts) => openaiBuildSummaryPrompt(lang, opts),
+        selectChatMessages:      openaiSelectChatMessages,
+    },
+
+    claude: {
+        callChat: ({ messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, keys, model, modelFallback }) =>
+            callClaudeAPI({ apiKey: keys, messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, chatModel: model, chatModelFallback: modelFallback }),
+
+        callMemory: ({ prompt, maxOutputTokens, keys, priority, model, modelFallback }) =>
+            callClaudeForMemory({ prompt, apiKey: keys, maxOutputTokens, priority, memoryModel: model, memoryModelFallback: modelFallback }),
+
+        callSummary: ({ prompt, maxOutputTokens, keys, model, modelFallback }) =>
+            callClaudeForSummary({ prompt, apiKey: keys, maxOutputTokens, summaryModel: model, summaryModelFallback: modelFallback }),
+
+        embedText:     ({ text, keys, model })  => claudeEmbedText({ text, apiKey: keys, embedModel: model }),
+        embedContents: ({ texts, keys, model }) => claudeEmbedContents({ texts, apiKey: keys, embedModel: model }),
+
+        parseMemoryJson: claudeParseMemoryJson,
+
+        buildSystemPrompt:       (lang, character, memCtx) => claudeBuildSystemPrompt(lang, character, memCtx),
+        buildMemoryUpdatePrompt: (lang, existing, character, recentMessages, userMsg, aiMsg) => claudeBuildMemoryUpdatePrompt(lang, existing, character, recentMessages, userMsg, aiMsg),
+        buildMemorySeedPrompt:   (lang, character) => claudeBuildMemorySeedPrompt(lang, character),
+        buildSummaryPrompt:      (lang, opts) => claudeBuildSummaryPrompt(lang, opts),
+        selectChatMessages:      claudeSelectChatMessages,
     },
 
     openrouter: {

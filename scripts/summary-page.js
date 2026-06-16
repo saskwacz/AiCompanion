@@ -6,8 +6,10 @@ import { openDB }                                       from './db.js';
 import { getChatById }                                  from './chats.js';
 import { getCharacterById }                             from './characters.js';
 import { getMessagesForChat }                           from './messages.js';
-import { resolveChatConfig }                            from './chat-config.js';
-import { getShuffledApiKeys }                           from './settings.js';
+import { resolveChatConfig, resolveModel }              from './chat-config.js';
+import { getShuffledApiKeys, getShuffledMistralApiKeys,
+         getShuffledGroqApiKeys, getShuffledOpenRouterApiKeys,
+         getShuffledOpenaiApiKeys, getShuffledClaudeApiKeys } from './settings.js';
 import { GEMINI_DEFAULTS }                              from './providers/gemini-models.js';
 import {
     getSummaryState, saveSummaryState, deleteSummaryForChat,
@@ -63,21 +65,47 @@ async function init() {
 
 // ─── Provider config builder ─────────────────────────────────────────────────
 function buildProviderCfg(cfg, role) {
-    const taskCfg = cfg[role] || GEMINI_DEFAULTS[role] || {};
+    const taskCfg  = cfg[role] || GEMINI_DEFAULTS[role] || {};
     const provider = taskCfg.provider || 'gemini';
-    const model    = provider === 'ollama'
-        ? (taskCfg.ollamaModel || null)
-        : (taskCfg.geminiModel || null);
-    const modelFallback = provider === 'gemini'
-        ? (taskCfg.geminiModelFallback || null)
-        : null;
+
+    let model, modelFallback, keys;
+    if (provider === 'ollama') {
+        model         = taskCfg.ollamaModel || null;
+        modelFallback = null;
+        keys          = [];
+    } else if (provider === 'mistral') {
+        model         = taskCfg.mistralModel || null;
+        modelFallback = taskCfg.mistralModelFallback || null;
+        keys          = getShuffledMistralApiKeys(cfg);
+    } else if (provider === 'groq') {
+        model         = taskCfg.groqModel || null;
+        modelFallback = taskCfg.groqModelFallback || null;
+        keys          = getShuffledGroqApiKeys(cfg);
+    } else if (provider === 'openrouter') {
+        model         = taskCfg.openrouterModel || null;
+        modelFallback = taskCfg.openrouterModelFallback || null;
+        keys          = getShuffledOpenRouterApiKeys(cfg);
+    } else if (provider === 'openai') {
+        model         = taskCfg.openaiModel || null;
+        modelFallback = taskCfg.openaiModelFallback || null;
+        keys          = getShuffledOpenaiApiKeys(cfg);
+    } else if (provider === 'claude') {
+        model         = taskCfg.claudeModel || null;
+        modelFallback = taskCfg.claudeModelFallback || null;
+        keys          = getShuffledClaudeApiKeys(cfg);
+    } else {
+        model         = taskCfg.geminiModel || null;
+        modelFallback = taskCfg.geminiModelFallback || null;
+        keys          = getShuffledApiKeys(cfg);
+    }
+
     return {
         provider,
-        keys:         getShuffledApiKeys(cfg),
-        ollamaUrl:    cfg.ollamaBaseUrl || 'http://localhost:11434',
-        model,
+        keys,
+        ollamaUrl:     cfg.ollamaBaseUrl || 'http://localhost:11434',
+        model:         model ?? resolveModel(taskCfg),
         modelFallback,
-        lang:         cfg.chatLang || 'pl',
+        lang:          cfg.chatLang || 'pl',
     };
 }
 

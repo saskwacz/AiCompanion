@@ -186,6 +186,35 @@
                 </small>
             </div>
 
+            <div class="settings-section-header">&#129302; OpenAI — klucze API</div>
+            <div class="setting-group">
+                <label>Klucze API (OpenAI)</label>
+                <div id="openai-api-keys-list" class="api-keys-list"></div>
+                <div class="api-key-form">
+                    <input type="text"     id="new-openai-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                    <input type="password" id="new-openai-key-value" class="setting-input" placeholder="Wklej klucz API OpenAI...">
+                    <button class="btn-secondary" onclick="app.addOpenaiApiKeyRow()">Dodaj</button>
+                </div>
+                <small>Klucze rotują losowo. Kopiowane automatycznie do nowych chatów.
+                    Uzyskaj na <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>.
+                </small>
+            </div>
+
+            <div class="settings-section-header">&#129302; Claude — klucze API</div>
+            <div class="setting-group">
+                <label>Klucze API (Anthropic Claude)</label>
+                <div id="claude-api-keys-list" class="api-keys-list"></div>
+                <div class="api-key-form">
+                    <input type="text"     id="new-claude-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                    <input type="password" id="new-claude-key-value" class="setting-input" placeholder="Wklej klucz API Claude...">
+                    <button class="btn-secondary" onclick="app.addClaudeApiKeyRow()">Dodaj</button>
+                </div>
+                <small>Klucze rotują losowo. Kopiowane automatycznie do nowych chatów.
+                    Uzyskaj na <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>.
+                    ⚠️ Claude nie obsługuje embeddings.
+                </small>
+            </div>
+
             <div class="settings-section-header">&#129302; Ollama — domyślny URL</div>
             <div class="setting-group">
                 <label for="ollama-base-url">URL Ollama (domyślny dla nowych chatów)</label>

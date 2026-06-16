@@ -1,6 +1,6 @@
 import { dbGet, dbPut } from './db.js';
 
-export const PROVIDER_NAMES = ['gemini', 'mistral', 'groq', 'openrouter', 'ollama'];
+export const PROVIDER_NAMES = ['gemini', 'mistral', 'groq', 'openrouter', 'openai', 'claude', 'ollama'];
 
 /**
  * Global settings contain only:
@@ -16,6 +16,8 @@ const DEFAULTS = {
     mistralApiKeys: [],
     groqApiKeys:        [],
     openrouterApiKeys:  [],
+    openaiApiKeys:      [],
+    claudeApiKeys:      [],
     ollamaBaseUrl:  'http://localhost:11434',
     chatFontSize:   14,
     debugPrompts:   false,
@@ -53,6 +55,30 @@ export function getShuffledApiKeys(cfg) {
  */
 export function getShuffledMistralApiKeys(cfg) {
     const keys = ((cfg?.mistralApiKeys) || []).filter(k => k.key).slice();
+    for (let i = keys.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [keys[i], keys[j]] = [keys[j], keys[i]];
+    }
+    return keys;
+}
+
+/**
+ * Return a shuffled copy of OpenAI API keys from a settings or chat-config object.
+ */
+export function getShuffledOpenaiApiKeys(cfg) {
+    const keys = ((cfg?.openaiApiKeys) || []).filter(k => k.key).slice();
+    for (let i = keys.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [keys[i], keys[j]] = [keys[j], keys[i]];
+    }
+    return keys;
+}
+
+/**
+ * Return a shuffled copy of Claude API keys from a settings or chat-config object.
+ */
+export function getShuffledClaudeApiKeys(cfg) {
+    const keys = ((cfg?.claudeApiKeys) || []).filter(k => k.key).slice();
     for (let i = keys.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [keys[i], keys[j]] = [keys[j], keys[i]];

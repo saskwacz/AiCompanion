@@ -28,6 +28,14 @@ import {
     OPENROUTER_DEFAULTS,
 } from './providers/openrouter-models.js';
 import {
+    OPENAI_CHAT_LIST, OPENAI_MEMORY_LIST, OPENAI_SUMMARY_LIST, OPENAI_EMBED_LIST,
+    OPENAI_DEFAULTS,
+} from './providers/openai-models.js';
+import {
+    CLAUDE_CHAT_LIST, CLAUDE_MEMORY_LIST, CLAUDE_SUMMARY_LIST,
+    CLAUDE_DEFAULTS,
+} from './providers/claude-models.js';
+import {
     OLLAMA_CHAT_LIST, OLLAMA_MEMORY_LIST, OLLAMA_SUMMARY_LIST, OLLAMA_EMBED_LIST,
     OLLAMA_DEFAULTS,
 } from './providers/ollama-models.js';
@@ -41,6 +49,8 @@ let   apiKeys           = [];   // Gemini keys for this chat
 let   mistralApiKeys    = [];   // Mistral keys for this chat
 let   groqApiKeys       = [];   // Groq keys for this chat
 let   openrouterApiKeys = [];   // OpenRouter keys for this chat
+let   openaiApiKeys     = [];   // OpenAI keys for this chat
+let   claudeApiKeys     = [];   // Claude keys for this chat
 let   globalSettings = {};
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -109,6 +119,14 @@ function populateForm(cfg) {
     openrouterApiKeys = [...(cfg.openrouterApiKeys || [])];
     renderOpenRouterApiKeysList();
 
+    // ── Per-chat OpenAI API keys ──
+    openaiApiKeys = [...(cfg.openaiApiKeys || [])];
+    renderOpenaiApiKeysList();
+
+    // ── Per-chat Claude API keys ──
+    claudeApiKeys = [...(cfg.claudeApiKeys || [])];
+    renderClaudeApiKeysList();
+
     // Note: model dropdowns are filled by fillModelDropdowns() after this
     window._pendingGeminiModels = {
         chat:          cfg.chat.geminiModel             || GEMINI_DEFAULTS.chat.geminiModel,
@@ -144,6 +162,23 @@ function populateForm(cfg) {
         memory:       cfg.memory.openrouterModel           || OPENROUTER_DEFAULTS.memory.openrouterModel,
         memFallback:  cfg.memory.openrouterModelFallback   ?? OPENROUTER_DEFAULTS.memory.openrouterModelFallback,
         summary:      cfg.summary.openrouterModel          || OPENROUTER_DEFAULTS.summary.openrouterModel,
+    };
+
+    window._pendingOpenaiModels = {
+        chat:         cfg.chat.openaiModel             || OPENAI_DEFAULTS.chat.openaiModel,
+        chatFallback: cfg.chat.openaiModelFallback     ?? OPENAI_DEFAULTS.chat.openaiModelFallback,
+        memory:       cfg.memory.openaiModel           || OPENAI_DEFAULTS.memory.openaiModel,
+        memFallback:  cfg.memory.openaiModelFallback   ?? OPENAI_DEFAULTS.memory.openaiModelFallback,
+        summary:      cfg.summary.openaiModel          || OPENAI_DEFAULTS.summary.openaiModel,
+        embed:        cfg.embed.openaiModel            || OPENAI_DEFAULTS.embed.openaiModel,
+    };
+
+    window._pendingClaudeModels = {
+        chat:         cfg.chat.claudeModel             || CLAUDE_DEFAULTS.chat.claudeModel,
+        chatFallback: cfg.chat.claudeModelFallback     ?? CLAUDE_DEFAULTS.chat.claudeModelFallback,
+        memory:       cfg.memory.claudeModel           || CLAUDE_DEFAULTS.memory.claudeModel,
+        memFallback:  cfg.memory.claudeModelFallback   ?? CLAUDE_DEFAULTS.memory.claudeModelFallback,
+        summary:      cfg.summary.claudeModel          || CLAUDE_DEFAULTS.summary.claudeModel,
     };
 }
 
@@ -183,6 +218,23 @@ function fillModelDropdowns() {
     buildModelSelect('g-or-summary-model', OPENROUTER_SUMMARY_LIST, por.summary, 'g-or-summary-model-custom');
     buildFallbackSelect('g-or-chat-model-fallback',   OPENROUTER_CHAT_LIST,   por.chatFallback);
     buildFallbackSelect('g-or-memory-model-fallback', OPENROUTER_MEMORY_LIST, por.memFallback);
+
+    // ── OpenAI ──
+    const poi = window._pendingOpenaiModels || {};
+    buildModelSelect('g-openai-chat-model',    OPENAI_CHAT_LIST,    poi.chat,    'g-openai-chat-model-custom');
+    buildModelSelect('g-openai-memory-model',  OPENAI_MEMORY_LIST,  poi.memory,  'g-openai-memory-model-custom');
+    buildModelSelect('g-openai-summary-model', OPENAI_SUMMARY_LIST, poi.summary, 'g-openai-summary-model-custom');
+    buildModelSelect('g-openai-embed-model',   OPENAI_EMBED_LIST,   poi.embed,   'g-openai-embed-model-custom');
+    buildFallbackSelect('g-openai-chat-model-fallback',   OPENAI_CHAT_LIST,   poi.chatFallback);
+    buildFallbackSelect('g-openai-memory-model-fallback', OPENAI_MEMORY_LIST, poi.memFallback);
+
+    // ── Claude ──
+    const pcl = window._pendingClaudeModels || {};
+    buildModelSelect('g-claude-chat-model',    CLAUDE_CHAT_LIST,    pcl.chat,    'g-claude-chat-model-custom');
+    buildModelSelect('g-claude-memory-model',  CLAUDE_MEMORY_LIST,  pcl.memory,  'g-claude-memory-model-custom');
+    buildModelSelect('g-claude-summary-model', CLAUDE_SUMMARY_LIST, pcl.summary, 'g-claude-summary-model-custom');
+    buildFallbackSelect('g-claude-chat-model-fallback',   CLAUDE_CHAT_LIST,   pcl.chatFallback);
+    buildFallbackSelect('g-claude-memory-model-fallback', CLAUDE_MEMORY_LIST, pcl.memFallback);
 }
 
 function buildModelSelect(selectId, list, currentModel, customInputId) {
@@ -525,6 +577,100 @@ Object.assign(window.page, {
     },
 });
 
+// ── OpenAI API Keys ───────────────────────────────────────────────────────────
+function renderOpenaiApiKeysList() {
+    const list = document.getElementById('g-openai-api-keys-list');
+    if (!list) return;
+
+    if (!openaiApiKeys.length) {
+        list.innerHTML = '<p class="no-keys">Brak kluczy — dodaj lub skopiuj z globalnych</p>';
+        return;
+    }
+
+    list.innerHTML = openaiApiKeys.map((k, i) => `
+        <div class="api-key-item">
+            <div class="api-key-main">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="removeOpenaiApiKey(${i})">Usuń</button>
+            </div>
+        </div>`).join('');
+}
+
+window.addOpenaiApiKey = function() {
+    const labelEl = document.getElementById('g-new-openai-key-label');
+    const keyEl   = document.getElementById('g-new-openai-key-value');
+    const key     = keyEl?.value.trim();
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+    openaiApiKeys = [...openaiApiKeys, { label: labelEl?.value.trim() || `Key ${openaiApiKeys.length + 1}`, key }];
+    if (labelEl) labelEl.value = '';
+    if (keyEl)   keyEl.value   = '';
+    renderOpenaiApiKeysList();
+};
+
+window.removeOpenaiApiKey = function(idx) {
+    if (!confirm('Usunąć ten klucz OpenAI z czatu?')) return;
+    openaiApiKeys = openaiApiKeys.filter((_, i) => i !== idx);
+    renderOpenaiApiKeysList();
+};
+
+window.syncOpenaiApiKeysFromGlobal = function() {
+    const global = globalSettings.openaiApiKeys || [];
+    if (!global.length) { showToast('Brak globalnych kluczy OpenAI', 'info'); return; }
+    const existing = new Set(openaiApiKeys.map(k => k.key));
+    const added    = global.filter(k => !existing.has(k.key));
+    openaiApiKeys = [...openaiApiKeys, ...added];
+    renderOpenaiApiKeysList();
+    showToast(`Skopiowano ${added.length} klucz(y) OpenAI`, 'success');
+};
+
+// ── Claude API Keys ─────────────────────────────────────────────────────────────
+function renderClaudeApiKeysList() {
+    const list = document.getElementById('g-claude-api-keys-list');
+    if (!list) return;
+
+    if (!claudeApiKeys.length) {
+        list.innerHTML = '<p class="no-keys">Brak kluczy — dodaj lub skopiuj z globalnych</p>';
+        return;
+    }
+
+    list.innerHTML = claudeApiKeys.map((k, i) => `
+        <div class="api-key-item">
+            <div class="api-key-main">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="removeClaudeApiKey(${i})">Usuń</button>
+            </div>
+        </div>`).join('');
+}
+
+window.addClaudeApiKey = function() {
+    const labelEl = document.getElementById('g-new-claude-key-label');
+    const keyEl   = document.getElementById('g-new-claude-key-value');
+    const key     = keyEl?.value.trim();
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+    claudeApiKeys = [...claudeApiKeys, { label: labelEl?.value.trim() || `Key ${claudeApiKeys.length + 1}`, key }];
+    if (labelEl) labelEl.value = '';
+    if (keyEl)   keyEl.value   = '';
+    renderClaudeApiKeysList();
+};
+
+window.removeClaudeApiKey = function(idx) {
+    if (!confirm('Usunąć ten klucz Claude z czatu?')) return;
+    claudeApiKeys = claudeApiKeys.filter((_, i) => i !== idx);
+    renderClaudeApiKeysList();
+};
+
+window.syncClaudeApiKeysFromGlobal = function() {
+    const global = globalSettings.claudeApiKeys || [];
+    if (!global.length) { showToast('Brak globalnych kluczy Claude', 'info'); return; }
+    const existing = new Set(claudeApiKeys.map(k => k.key));
+    const added    = global.filter(k => !existing.has(k.key));
+    claudeApiKeys = [...claudeApiKeys, ...added];
+    renderClaudeApiKeysList();
+    showToast(`Skopiowano ${added.length} klucz(y) Claude`, 'success');
+};
+
 // ─── Collect form → config ────────────────────────────────────────────────────
 function collectConfig() {
     const pf  = (id, fallback) => parseFloat(document.getElementById(id)?.value ?? fallback);
@@ -543,9 +689,13 @@ function collectConfig() {
             mistralModelFallback: document.getElementById('g-mistral-chat-model-fallback')?.value || null,
             groqModel:              str('g-groq-chat-model',       GROQ_DEFAULTS.chat.groqModel),
             groqModelFallback:      document.getElementById('g-groq-chat-model-fallback')?.value || null,
-            openrouterModel:        str('g-or-chat-model',         OPENROUTER_DEFAULTS.chat.openrouterModel),
+            openrouterModel:         str('g-or-chat-model',         OPENROUTER_DEFAULTS.chat.openrouterModel),
             openrouterModelFallback: document.getElementById('g-or-chat-model-fallback')?.value || null,
-            ollamaModel:            str('g-ollama-chat-model',     OLLAMA_DEFAULTS.chat.ollamaModel),
+            openaiModel:             str('g-openai-chat-model',     OPENAI_DEFAULTS.chat.openaiModel),
+            openaiModelFallback:     document.getElementById('g-openai-chat-model-fallback')?.value || null,
+            claudeModel:             str('g-claude-chat-model',     CLAUDE_DEFAULTS.chat.claudeModel),
+            claudeModelFallback:     document.getElementById('g-claude-chat-model-fallback')?.value || null,
+            ollamaModel:             str('g-ollama-chat-model',     OLLAMA_DEFAULTS.chat.ollamaModel),
         },
         memory: {
             provider:               str('g-memory-provider',    'gemini'),
@@ -557,9 +707,13 @@ function collectConfig() {
             mistralModelFallback:   document.getElementById('g-mistral-memory-model-fallback')?.value || null,
             groqModel:              str('g-groq-memory-model',    GROQ_DEFAULTS.memory.groqModel),
             groqModelFallback:      document.getElementById('g-groq-memory-model-fallback')?.value || null,
-            openrouterModel:        str('g-or-memory-model',      OPENROUTER_DEFAULTS.memory.openrouterModel),
+            openrouterModel:         str('g-or-memory-model',      OPENROUTER_DEFAULTS.memory.openrouterModel),
             openrouterModelFallback: document.getElementById('g-or-memory-model-fallback')?.value || null,
-            ollamaModel:            str('g-ollama-memory-model',  OLLAMA_DEFAULTS.memory.ollamaModel),
+            openaiModel:             str('g-openai-memory-model',  OPENAI_DEFAULTS.memory.openaiModel),
+            openaiModelFallback:     document.getElementById('g-openai-memory-model-fallback')?.value || null,
+            claudeModel:             str('g-claude-memory-model',  CLAUDE_DEFAULTS.memory.claudeModel),
+            claudeModelFallback:     document.getElementById('g-claude-memory-model-fallback')?.value || null,
+            ollamaModel:             str('g-ollama-memory-model',  OLLAMA_DEFAULTS.memory.ollamaModel),
         },
         summary: {
             provider:               str('g-summary-provider',    'gemini'),
@@ -572,16 +726,22 @@ function collectConfig() {
             mistralModelFallback:   null,
             groqModel:              str('g-groq-summary-model',    GROQ_DEFAULTS.summary.groqModel),
             groqModelFallback:      null,
-            openrouterModel:        str('g-or-summary-model',     OPENROUTER_DEFAULTS.summary.openrouterModel),
+            openrouterModel:         str('g-or-summary-model',     OPENROUTER_DEFAULTS.summary.openrouterModel),
             openrouterModelFallback: null,
-            ollamaModel:            str('g-ollama-summary-model',  OLLAMA_DEFAULTS.summary.ollamaModel),
+            openaiModel:             str('g-openai-summary-model', OPENAI_DEFAULTS.summary.openaiModel),
+            openaiModelFallback:     null,
+            claudeModel:             str('g-claude-summary-model', CLAUDE_DEFAULTS.summary.claudeModel),
+            claudeModelFallback:     null,
+            ollamaModel:             str('g-ollama-summary-model', OLLAMA_DEFAULTS.summary.ollamaModel),
         },
         embed: {
             provider:              str('g-embed-provider',    'gemini'),
             geminiModel:           str('g-gemini-embed-model',  GEMINI_DEFAULTS.embed.geminiModel),
             mistralModel:          str('g-mistral-embed-model', MISTRAL_DEFAULTS.embed.mistralModel),
-            groqModel:             null,        // Groq has no embeddings
-            openrouterModel:       null,        // OpenRouter has no embeddings
+            groqModel:             null,
+            openrouterModel:       null,
+            openaiModel:           str('g-openai-embed-model',  OPENAI_DEFAULTS.embed.openaiModel),
+            claudeModel:           null,
             ollamaModel:           str('g-ollama-embed-model',  OLLAMA_DEFAULTS.embed.ollamaModel),
         },
         ollamaBaseUrl:     str('g-ollama-url', 'http://localhost:11434'),
@@ -589,6 +749,8 @@ function collectConfig() {
         mistralApiKeys:    [...mistralApiKeys],
         groqApiKeys:       [...groqApiKeys],
         openrouterApiKeys: [...openrouterApiKeys],
+        openaiApiKeys:     [...openaiApiKeys],
+        claudeApiKeys:     [...claudeApiKeys],
         chatLang:          str('g-chat-lang', 'pl'),
     };
 }

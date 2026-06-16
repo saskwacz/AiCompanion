@@ -1,7 +1,8 @@
 import { openDB }                                                      from './db.js';
 import { loadSettings, persistSettings, getShuffledApiKeys,
          getShuffledMistralApiKeys, getShuffledGroqApiKeys,
-         getShuffledOpenRouterApiKeys }                                 from './settings.js';
+         getShuffledOpenRouterApiKeys, getShuffledOpenaiApiKeys,
+         getShuffledClaudeApiKeys }                                 from './settings.js';
 import { getCharacterById, getAllCharacters,
          getCharacterAvatar }                                           from './characters.js';
 import { callChatAPI, buildSystemPrompt, AllModelsRateLimitedError } from './providers/index.js';
@@ -64,6 +65,14 @@ function getProviderConfig(role = 'chat') {
         model         = taskCfg.openrouterModel || null;
         modelFallback = taskCfg.openrouterModelFallback || null;
         keys          = getShuffledOpenRouterApiKeys(cfg);
+    } else if (provider === 'openai') {
+        model         = taskCfg.openaiModel || null;
+        modelFallback = taskCfg.openaiModelFallback || null;
+        keys          = getShuffledOpenaiApiKeys(cfg);
+    } else if (provider === 'claude') {
+        model         = taskCfg.claudeModel || null;
+        modelFallback = taskCfg.claudeModelFallback || null;
+        keys          = getShuffledClaudeApiKeys(cfg);
     } else {
         // gemini (default)
         model         = taskCfg.geminiModel || null;
@@ -89,7 +98,7 @@ function getTaskCfg(role) {
 
 /** Build initial chat config for a new chat, seeded with global API keys. */
 function buildDefaultChatConfig() {
-    return _buildDefault(settings.apiKeys, settings.ollamaBaseUrl, settings.mistralApiKeys, settings.groqApiKeys, settings.openrouterApiKeys);
+    return _buildDefault(settings.apiKeys, settings.ollamaBaseUrl, settings.mistralApiKeys, settings.groqApiKeys, settings.openrouterApiKeys, settings.openaiApiKeys, settings.claudeApiKeys);
 
 }
 
@@ -344,6 +353,12 @@ async function appSendMessage(retryText) {
     }
     if (chatCfg.provider === 'openrouter' && !chatCfg.keys.length) {
         showToast('Dodaj klucz API OpenRouter w ustawieniach czatu', 'error'); return;
+    }
+    if (chatCfg.provider === 'openai'     && !chatCfg.keys.length) {
+        showToast('Dodaj klucz API OpenAI w ustawieniach czatu', 'error'); return;
+    }
+    if (chatCfg.provider === 'claude'     && !chatCfg.keys.length) {
+        showToast('Dodaj klucz API Claude w ustawieniach czatu', 'error'); return;
     }
 
     // On retry: the user message may already be saved in DB (from a previous failed attempt).
@@ -787,6 +802,8 @@ async function openSettings() {
     renderMistralApiKeysList();
     renderGroqApiKeysList();
     renderOpenRouterApiKeysList();
+    renderOpenaiApiKeysList();
+    renderClaudeApiKeysList();
     openModal('settings-modal');
 }
 
@@ -921,6 +938,72 @@ function removeOpenRouterApiKey(idx) {
     renderOpenRouterApiKeysList();
 }
 
+// ── OpenAI global keys ──
+function renderOpenaiApiKeysList() {
+    const list = document.getElementById('openai-api-keys-list');
+    if (!list) return;
+    const keys = settings.openaiApiKeys || [];
+    list.innerHTML = keys.length
+        ? keys.map((k, i) => `
+            <div class="api-key-item">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="app.removeOpenaiApiKey(${i})">Usuń</button>
+            </div>`).join('')
+        : '<p class="no-keys">Brak kluczy</p>';
+}
+
+function addOpenaiApiKeyRow() {
+    const labelEl = document.getElementById('new-openai-key-label');
+    const keyEl   = document.getElementById('new-openai-key-value');
+    const key     = keyEl?.value.trim();
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+    settings.openaiApiKeys = [...(settings.openaiApiKeys || []),
+        { label: labelEl?.value.trim() || `Key ${(settings.openaiApiKeys?.length || 0) + 1}`, key }];
+    if (labelEl) labelEl.value = '';
+    if (keyEl)   keyEl.value   = '';
+    renderOpenaiApiKeysList();
+}
+
+function removeOpenaiApiKey(idx) {
+    if (!confirm('Usunąć ten klucz?')) return;
+    settings.openaiApiKeys = settings.openaiApiKeys.filter((_, i) => i !== idx);
+    renderOpenaiApiKeysList();
+}
+
+// ── Claude global keys ──
+function renderClaudeApiKeysList() {
+    const list = document.getElementById('claude-api-keys-list');
+    if (!list) return;
+    const keys = settings.claudeApiKeys || [];
+    list.innerHTML = keys.length
+        ? keys.map((k, i) => `
+            <div class="api-key-item">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="app.removeClaudeApiKey(${i})">Usuń</button>
+            </div>`).join('')
+        : '<p class="no-keys">Brak kluczy</p>';
+}
+
+function addClaudeApiKeyRow() {
+    const labelEl = document.getElementById('new-claude-key-label');
+    const keyEl   = document.getElementById('new-claude-key-value');
+    const key     = keyEl?.value.trim();
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+    settings.claudeApiKeys = [...(settings.claudeApiKeys || []),
+        { label: labelEl?.value.trim() || `Key ${(settings.claudeApiKeys?.length || 0) + 1}`, key }];
+    if (labelEl) labelEl.value = '';
+    if (keyEl)   keyEl.value   = '';
+    renderClaudeApiKeysList();
+}
+
+function removeClaudeApiKey(idx) {
+    if (!confirm('Usunąć ten klucz?')) return;
+    settings.claudeApiKeys = settings.claudeApiKeys.filter((_, i) => i !== idx);
+    renderClaudeApiKeysList();
+}
+
 async function handleSaveSettings() {
     const dp  = document.getElementById('debug-prompts');
     const obu = document.getElementById('ollama-base-url');
@@ -1051,6 +1134,10 @@ window.app = {
     removeGroqApiKey,
     addOpenRouterApiKeyRow,
     removeOpenRouterApiKey,
+    addOpenaiApiKeyRow,
+    removeOpenaiApiKey,
+    addClaudeApiKeyRow,
+    removeClaudeApiKey,
 
     openChatSettings:         navigateToChatSettings,
     openCharacterEditor:      charId => navigateToCharEditor(charId),

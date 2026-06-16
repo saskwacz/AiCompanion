@@ -33,6 +33,8 @@
         <button class="cs-outer-tab"        data-tab="mistral"  onclick="switchTab(this,'mistral')">&#9889; Mistral</button>
         <button class="cs-outer-tab"        data-tab="groq"        onclick="switchTab(this,'groq')">&#9889; Groq</button>
         <button class="cs-outer-tab"        data-tab="openrouter"  onclick="switchTab(this,'openrouter')">&#127760; OpenRouter</button>
+        <button class="cs-outer-tab"        data-tab="openai"      onclick="switchTab(this,'openai')">&#129302; OpenAI</button>
+        <button class="cs-outer-tab"        data-tab="claude"      onclick="switchTab(this,'claude')">&#129302; Claude</button>
         <button class="cs-outer-tab"        data-tab="ollama"   onclick="switchTab(this,'ollama')">&#129302; Ollama</button>
     </div>
 
@@ -49,6 +51,8 @@
                     <button class="btn-secondary small" onclick="setAllProviders('mistral')">Mistral</button>
                     <button class="btn-secondary small" onclick="setAllProviders('groq')">Groq</button>
                     <button class="btn-secondary small" onclick="setAllProviders('openrouter')">OpenRouter</button>
+                    <button class="btn-secondary small" onclick="setAllProviders('openai')">OpenAI</button>
+                    <button class="btn-secondary small" onclick="setAllProviders('claude')">Claude</button>
                     <button class="btn-secondary small" onclick="setAllProviders('ollama')">Ollama (local)</button>
                 </div>
             </div>
@@ -64,6 +68,8 @@
                             <option value="mistral">Mistral</option>
                             <option value="groq">Groq</option>
                             <option value="openrouter">OpenRouter</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude</option>
                             <option value="ollama">Ollama (local)</option>
                         </select>
                     </div>
@@ -110,6 +116,8 @@
                             <option value="mistral">Mistral</option>
                             <option value="groq">Groq</option>
                             <option value="openrouter">OpenRouter</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude</option>
                             <option value="ollama">Ollama (local)</option>
                         </select>
                     </div>
@@ -141,6 +149,8 @@
                             <option value="mistral">Mistral</option>
                             <option value="groq">Groq</option>
                             <option value="openrouter">OpenRouter</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude</option>
                             <option value="ollama">Ollama (local)</option>
                         </select>
                     </div>
@@ -182,6 +192,8 @@
                     <option value="mistral">Mistral</option>
                     <option value="groq">Groq ⚠️ brak embeddings</option>
                     <option value="openrouter">OpenRouter ⚠️ brak embeddings</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="claude">Claude ⚠️ brak embeddings</option>
                     <option value="ollama">Ollama (local)</option>
                 </select>
             </div>
@@ -569,6 +581,171 @@
             </div>
 
         </div><!-- /openrouter panel -->
+
+        <!-- ══════════════ OPENAI TAB ══════════════ -->
+        <div class="cs-outer-panel" id="cs-panel-openai">
+
+            <div class="cs-inner-tabs" role="tablist">
+                <button class="cs-inner-tab active" data-inner="openai-general" onclick="switchInnerTab(this,'openai-general')">Ogólne</button>
+                <button class="cs-inner-tab"        data-inner="openai-chat"    onclick="switchInnerTab(this,'openai-chat')">Chat</button>
+                <button class="cs-inner-tab"        data-inner="openai-memory"  onclick="switchInnerTab(this,'openai-memory')">Memory</button>
+                <button class="cs-inner-tab"        data-inner="openai-summary" onclick="switchInnerTab(this,'openai-summary')">Summary</button>
+                <button class="cs-inner-tab"        data-inner="openai-embed"   onclick="switchInnerTab(this,'openai-embed')">Embeddings</button>
+            </div>
+
+            <div class="cs-inner-panel active" id="cs-inner-openai-general">
+                <div class="setting-group">
+                    <label>Klucze API OpenAI (tego czatu)</label>
+                    <div id="g-openai-api-keys-list" class="api-keys-list"></div>
+                    <div class="api-key-form">
+                        <input type="text"     id="g-new-openai-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                        <input type="password" id="g-new-openai-key-value" class="setting-input" placeholder="Wklej klucz API OpenAI...">
+                        <button class="btn-secondary" onclick="addOpenaiApiKey()">Dodaj</button>
+                    </div>
+                    <button class="btn-secondary small" onclick="syncOpenaiApiKeysFromGlobal()" style="margin-top:8px">
+                        &#8595; Kopiuj z globalnych
+                    </button>
+                    <small style="display:block;margin-top:6px;color:var(--text-secondary)">
+                        Uzyskaj klucz na <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>.
+                    </small>
+                </div>
+            </div>
+
+            <div class="cs-inner-panel" id="cs-inner-openai-chat">
+                <div class="setting-group">
+                    <label for="g-openai-chat-model">Model OpenAI dla czatu</label>
+                    <select id="g-openai-chat-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-openai-chat-model-custom" class="setting-input" placeholder="gpt-4o"
+                               oninput="syncCustomModel(this,'g-openai-chat-model')">
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label for="g-openai-chat-model-fallback">Fallback model</label>
+                    <select id="g-openai-chat-model-fallback" class="setting-input"></select>
+                </div>
+            </div>
+
+            <div class="cs-inner-panel" id="cs-inner-openai-memory">
+                <div class="setting-group">
+                    <label for="g-openai-memory-model">Model OpenAI dla memory</label>
+                    <select id="g-openai-memory-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-openai-memory-model-custom" class="setting-input" placeholder="gpt-4o-mini"
+                               oninput="syncCustomModel(this,'g-openai-memory-model')">
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label for="g-openai-memory-model-fallback">Fallback model</label>
+                    <select id="g-openai-memory-model-fallback" class="setting-input"></select>
+                </div>
+            </div>
+
+            <div class="cs-inner-panel" id="cs-inner-openai-summary">
+                <div class="setting-group">
+                    <label for="g-openai-summary-model">Model OpenAI dla summary</label>
+                    <select id="g-openai-summary-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-openai-summary-model-custom" class="setting-input" placeholder="gpt-4o-mini"
+                               oninput="syncCustomModel(this,'g-openai-summary-model')">
+                    </div>
+                </div>
+            </div>
+
+            <div class="cs-inner-panel" id="cs-inner-openai-embed">
+                <div class="setting-group">
+                    <label for="g-openai-embed-model">Model OpenAI dla embeddings</label>
+                    <select id="g-openai-embed-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-openai-embed-model-custom" class="setting-input" placeholder="text-embedding-3-small"
+                               oninput="syncCustomModel(this,'g-openai-embed-model')">
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /openai panel -->
+
+        <!-- ══════════════ CLAUDE TAB ══════════════ -->
+        <div class="cs-outer-panel" id="cs-panel-claude">
+
+            <div class="cs-inner-tabs" role="tablist">
+                <button class="cs-inner-tab active" data-inner="claude-general" onclick="switchInnerTab(this,'claude-general')">Ogólne</button>
+                <button class="cs-inner-tab"        data-inner="claude-chat"    onclick="switchInnerTab(this,'claude-chat')">Chat</button>
+                <button class="cs-inner-tab"        data-inner="claude-memory"  onclick="switchInnerTab(this,'claude-memory')">Memory</button>
+                <button class="cs-inner-tab"        data-inner="claude-summary" onclick="switchInnerTab(this,'claude-summary')">Summary</button>
+            </div>
+
+            <div class="cs-inner-panel active" id="cs-inner-claude-general">
+                <div class="setting-group">
+                    <label>Klucze API Claude (tego czatu)</label>
+                    <div id="g-claude-api-keys-list" class="api-keys-list"></div>
+                    <div class="api-key-form">
+                        <input type="text"     id="g-new-claude-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                        <input type="password" id="g-new-claude-key-value" class="setting-input" placeholder="Wklej klucz API Claude...">
+                        <button class="btn-secondary" onclick="addClaudeApiKey()">Dodaj</button>
+                    </div>
+                    <button class="btn-secondary small" onclick="syncClaudeApiKeysFromGlobal()" style="margin-top:8px">
+                        &#8595; Kopiuj z globalnych
+                    </button>
+                    <small style="display:block;margin-top:6px;color:var(--text-secondary)">
+                        Uzyskaj klucz na <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>.
+                    </small>
+                    <div class="field-hint" style="margin-top:10px;background:var(--bg-tertiary);padding:8px;border-radius:6px;">
+                        ⚠️ <strong>Claude nie obsługuje embeddings.</strong> Jeśli używasz Claude do chatu/memory/summary, ustaw
+                        Embeddings na Gemini, OpenAI, Mistral lub Ollama.
+                    </div>
+                </div>
+            </div>
+
+            <div class="cs-inner-panel" id="cs-inner-claude-chat">
+                <div class="setting-group">
+                    <label for="g-claude-chat-model">Model Claude dla czatu</label>
+                    <select id="g-claude-chat-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-claude-chat-model-custom" class="setting-input" placeholder="claude-sonnet-4-5"
+                               oninput="syncCustomModel(this,'g-claude-chat-model')">
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label for="g-claude-chat-model-fallback">Fallback model</label>
+                    <select id="g-claude-chat-model-fallback" class="setting-input"></select>
+                </div>
+            </div>
+
+            <div class="cs-inner-panel" id="cs-inner-claude-memory">
+                <div class="setting-group">
+                    <label for="g-claude-memory-model">Model Claude dla memory</label>
+                    <select id="g-claude-memory-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-claude-memory-model-custom" class="setting-input" placeholder="claude-haiku-4-5"
+                               oninput="syncCustomModel(this,'g-claude-memory-model')">
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label for="g-claude-memory-model-fallback">Fallback model</label>
+                    <select id="g-claude-memory-model-fallback" class="setting-input"></select>
+                </div>
+            </div>
+
+            <div class="cs-inner-panel" id="cs-inner-claude-summary">
+                <div class="setting-group">
+                    <label for="g-claude-summary-model">Model Claude dla summary</label>
+                    <select id="g-claude-summary-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-claude-summary-model-custom" class="setting-input" placeholder="claude-haiku-4-5"
+                               oninput="syncCustomModel(this,'g-claude-summary-model')">
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /claude panel -->
 
         <!-- ══════════════ OLLAMA TAB ══════════════ -->
         <div class="cs-outer-panel" id="cs-panel-ollama">
