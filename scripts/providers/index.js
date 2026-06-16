@@ -8,7 +8,7 @@
  * getProviderConfig() in main.js:
  *
  *   {
- *     provider:  'gemini' | 'ollama' | 'mistral'
+ *     provider:  'gemini' | 'ollama' | 'mistral' | 'groq' | 'openrouter'
  *     keys:      [{label, key}, …]     // Gemini/Mistral API keys (ignored for Ollama)
  *     ollamaUrl: 'http://…'            // Ollama base URL (ignored for Gemini/Mistral)
  *     model:     'model-id' | null     // per-role model override (null = provider default)
@@ -44,6 +44,42 @@ import {
     buildSummaryPrompt      as geminiBuildSummaryPrompt,
     selectChatMessages      as geminiSelectChatMessages,
 } from './gemini-prompts.js';
+
+// ─── OpenRouter ────────────────────────────────────────────────────────────────
+import {
+    callOpenRouterAPI,
+    callOpenRouterForMemory,
+    callOpenRouterForSummary,
+    embedText       as openrouterEmbedText,
+    embedContents   as openrouterEmbedContents,
+    parseMemoryJson as openrouterParseMemoryJson,
+} from './openrouter.js';
+
+import {
+    buildSystemPrompt       as openrouterBuildSystemPrompt,
+    buildMemoryUpdatePrompt as openrouterBuildMemoryUpdatePrompt,
+    buildMemorySeedPrompt   as openrouterBuildMemorySeedPrompt,
+    buildSummaryPrompt      as openrouterBuildSummaryPrompt,
+    selectChatMessages      as openrouterSelectChatMessages,
+} from './openrouter-prompts.js';
+
+// ─── Groq ──────────────────────────────────────────────────────────────────────
+import {
+    callGroqAPI,
+    callGroqForMemory,
+    callGroqForSummary,
+    embedText      as groqEmbedText,
+    embedContents  as groqEmbedContents,
+    parseMemoryJson as groqParseMemoryJson,
+} from './groq.js';
+
+import {
+    buildSystemPrompt       as groqBuildSystemPrompt,
+    buildMemoryUpdatePrompt as groqBuildMemoryUpdatePrompt,
+    buildMemorySeedPrompt   as groqBuildMemorySeedPrompt,
+    buildSummaryPrompt      as groqBuildSummaryPrompt,
+    selectChatMessages      as groqSelectChatMessages,
+} from './groq-prompts.js';
 
 // ─── Mistral ───────────────────────────────────────────────────────────────────
 import {
@@ -109,6 +145,50 @@ const PROVIDERS = {
         buildMemorySeedPrompt:   (lang, character) => geminiBuildMemorySeedPrompt(lang, character),
         buildSummaryPrompt:      (lang, opts) => geminiBuildSummaryPrompt(lang, opts),
         selectChatMessages:      geminiSelectChatMessages,
+    },
+
+    openrouter: {
+        callChat: ({ messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, keys, model, modelFallback }) =>
+            callOpenRouterAPI({ apiKey: keys, messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, chatModel: model, chatModelFallback: modelFallback }),
+
+        callMemory: ({ prompt, maxOutputTokens, keys, priority, model, modelFallback }) =>
+            callOpenRouterForMemory({ prompt, apiKey: keys, maxOutputTokens, priority, memoryModel: model, memoryModelFallback: modelFallback }),
+
+        callSummary: ({ prompt, maxOutputTokens, keys, model, modelFallback }) =>
+            callOpenRouterForSummary({ prompt, apiKey: keys, maxOutputTokens, summaryModel: model, summaryModelFallback: modelFallback }),
+
+        embedText:     ({ text, keys, model })   => openrouterEmbedText({ text, apiKey: keys, embedModel: model }),
+        embedContents: ({ texts, keys, model })  => openrouterEmbedContents({ texts, apiKey: keys, embedModel: model }),
+
+        parseMemoryJson: openrouterParseMemoryJson,
+
+        buildSystemPrompt:       (lang, character, memCtx) => openrouterBuildSystemPrompt(lang, character, memCtx),
+        buildMemoryUpdatePrompt: (lang, existing, character, recentMessages, userMsg, aiMsg) => openrouterBuildMemoryUpdatePrompt(lang, existing, character, recentMessages, userMsg, aiMsg),
+        buildMemorySeedPrompt:   (lang, character) => openrouterBuildMemorySeedPrompt(lang, character),
+        buildSummaryPrompt:      (lang, opts) => openrouterBuildSummaryPrompt(lang, opts),
+        selectChatMessages:      openrouterSelectChatMessages,
+    },
+
+    groq: {
+        callChat: ({ messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, keys, model, modelFallback }) =>
+            callGroqAPI({ apiKey: keys, messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, chatModel: model, chatModelFallback: modelFallback }),
+
+        callMemory: ({ prompt, maxOutputTokens, keys, priority, model, modelFallback }) =>
+            callGroqForMemory({ prompt, apiKey: keys, maxOutputTokens, priority, memoryModel: model, memoryModelFallback: modelFallback }),
+
+        callSummary: ({ prompt, maxOutputTokens, keys, model, modelFallback }) =>
+            callGroqForSummary({ prompt, apiKey: keys, maxOutputTokens, summaryModel: model, summaryModelFallback: modelFallback }),
+
+        embedText:    ({ text, keys, model })  => groqEmbedText({ text, apiKey: keys, embedModel: model }),
+        embedContents: ({ texts, keys, model }) => groqEmbedContents({ texts, apiKey: keys, embedModel: model }),
+
+        parseMemoryJson: groqParseMemoryJson,
+
+        buildSystemPrompt:       (lang, character, memCtx) => groqBuildSystemPrompt(lang, character, memCtx),
+        buildMemoryUpdatePrompt: (lang, existing, character, recentMessages, userMsg, aiMsg) => groqBuildMemoryUpdatePrompt(lang, existing, character, recentMessages, userMsg, aiMsg),
+        buildMemorySeedPrompt:   (lang, character) => groqBuildMemorySeedPrompt(lang, character),
+        buildSummaryPrompt:      (lang, opts) => groqBuildSummaryPrompt(lang, opts),
+        selectChatMessages:      groqSelectChatMessages,
     },
 
     mistral: {

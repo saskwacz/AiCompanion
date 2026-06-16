@@ -5,10 +5,12 @@
  * Imported by main.js, character-editor.js, chat-settings-page.js.
  */
 
-import { GEMINI_DEFAULTS } from './providers/gemini-models.js';
-import { MISTRAL_DEFAULTS } from './providers/mistral-models.js';
+import { GEMINI_DEFAULTS }      from './providers/gemini-models.js';
+import { MISTRAL_DEFAULTS }     from './providers/mistral-models.js';
+import { GROQ_DEFAULTS }        from './providers/groq-models.js';
+import { OPENROUTER_DEFAULTS }  from './providers/openrouter-models.js';
 
-export { GEMINI_DEFAULTS, MISTRAL_DEFAULTS };
+export { GEMINI_DEFAULTS, MISTRAL_DEFAULTS, GROQ_DEFAULTS, OPENROUTER_DEFAULTS };
 
 const TASKS = ['chat', 'memory', 'summary', 'embed'];
 
@@ -93,30 +95,34 @@ export function resolveChatConfig(chat) {
     if (!chat?.config) return buildDefaultChatConfig();
     const stored = migrateConfig(chat.config) || {};
     return {
-        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...(stored.chat    || {}) },
-        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...(stored.memory  || {}) },
-        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...(stored.summary || {}) },
-        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...(stored.embed   || {}) },
-        apiKeys:        stored.apiKeys        || [],
-        mistralApiKeys: stored.mistralApiKeys || [],
-        ollamaBaseUrl:  stored.ollamaBaseUrl  || 'http://localhost:11434',
-        chatLang:       stored.chatLang       || 'pl',
+        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,    ...OPENROUTER_DEFAULTS.chat,    ...(stored.chat    || {}) },
+        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,  ...OPENROUTER_DEFAULTS.memory,  ...(stored.memory  || {}) },
+        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary, ...OPENROUTER_DEFAULTS.summary, ...(stored.summary || {}) },
+        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,   ...OPENROUTER_DEFAULTS.embed,   ...(stored.embed   || {}) },
+        apiKeys:           stored.apiKeys           || [],
+        mistralApiKeys:    stored.mistralApiKeys    || [],
+        groqApiKeys:       stored.groqApiKeys       || [],
+        openrouterApiKeys: stored.openrouterApiKeys || [],
+        ollamaBaseUrl:     stored.ollamaBaseUrl     || 'http://localhost:11434',
+        chatLang:          stored.chatLang          || 'pl',
     };
 }
 
 /**
  * Build a fresh chat config seeded with global API keys / Ollama URL.
  */
-export function buildDefaultChatConfig(globalApiKeys = [], ollamaBaseUrl = 'http://localhost:11434', globalMistralApiKeys = []) {
+export function buildDefaultChatConfig(globalApiKeys = [], ollamaBaseUrl = 'http://localhost:11434', globalMistralApiKeys = [], globalGroqApiKeys = [], globalOpenRouterApiKeys = []) {
     return {
-        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat },
-        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory },
-        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary },
-        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed },
-        apiKeys:        [...(globalApiKeys        || [])],
-        mistralApiKeys: [...(globalMistralApiKeys || [])],
-        ollamaBaseUrl:  ollamaBaseUrl || 'http://localhost:11434',
-        chatLang:       'pl',
+        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,    ...OPENROUTER_DEFAULTS.chat },
+        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,  ...OPENROUTER_DEFAULTS.memory },
+        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary, ...OPENROUTER_DEFAULTS.summary },
+        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,   ...OPENROUTER_DEFAULTS.embed },
+        apiKeys:           [...(globalApiKeys           || [])],
+        mistralApiKeys:    [...(globalMistralApiKeys    || [])],
+        groqApiKeys:       [...(globalGroqApiKeys       || [])],
+        openrouterApiKeys: [...(globalOpenRouterApiKeys || [])],
+        ollamaBaseUrl:     ollamaBaseUrl || 'http://localhost:11434',
+        chatLang:          'pl',
     };
 }
 
@@ -127,7 +133,9 @@ export function buildDefaultChatConfig(globalApiKeys = [], ollamaBaseUrl = 'http
 export function resolveModel(taskCfg) {
     if (!taskCfg) return null;
     const provider = taskCfg.provider || 'gemini';
-    if (provider === 'ollama')   return taskCfg.ollamaModel   || null;
-    if (provider === 'mistral')  return taskCfg.mistralModel  || null;
+    if (provider === 'ollama')   return taskCfg.ollamaModel  || null;
+    if (provider === 'mistral')  return taskCfg.mistralModel || null;
+    if (provider === 'groq')        return taskCfg.groqModel        || null;
+    if (provider === 'openrouter')  return taskCfg.openrouterModel  || null;
     return taskCfg.geminiModel || null;
 }

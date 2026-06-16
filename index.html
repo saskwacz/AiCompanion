@@ -156,6 +156,36 @@
                 </small>
             </div>
 
+            <div class="settings-section-header">&#9889; Groq — klucze API</div>
+            <div class="setting-group">
+                <label>Klucze API (Groq)</label>
+                <div id="groq-api-keys-list" class="api-keys-list"></div>
+                <div class="api-key-form">
+                    <input type="text"     id="new-groq-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                    <input type="password" id="new-groq-key-value" class="setting-input" placeholder="Wklej klucz API Groq...">
+                    <button class="btn-secondary" onclick="app.addGroqApiKeyRow()">Dodaj</button>
+                </div>
+                <small>Klucze rotują losowo. Kopiowane automatycznie do nowych chatów.
+                    Uzyskaj na <a href="https://console.groq.com" target="_blank">console.groq.com</a>.
+                    ⚠️ Groq nie obsługuje embeddings.
+                </small>
+            </div>
+
+            <div class="settings-section-header">&#127760; OpenRouter — klucze API</div>
+            <div class="setting-group">
+                <label>Klucze API (OpenRouter)</label>
+                <div id="openrouter-api-keys-list" class="api-keys-list"></div>
+                <div class="api-key-form">
+                    <input type="text"     id="new-openrouter-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                    <input type="password" id="new-openrouter-key-value" class="setting-input" placeholder="Wklej klucz API OpenRouter...">
+                    <button class="btn-secondary" onclick="app.addOpenRouterApiKeyRow()">Dodaj</button>
+                </div>
+                <small>Klucze rotują losowo. Kopiowane automatycznie do nowych chatów.
+                    Uzyskaj na <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>.
+                    ⚠️ OpenRouter nie obsługuje embeddings.
+                </small>
+            </div>
+
             <div class="settings-section-header">&#129302; Ollama — domyślny URL</div>
             <div class="setting-group">
                 <label for="ollama-base-url">URL Ollama (domyślny dla nowych chatów)</label>

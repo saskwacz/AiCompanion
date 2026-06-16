@@ -31,6 +31,8 @@
         <button class="cs-outer-tab active" data-tab="general"  onclick="switchTab(this,'general')">&#9881;&#65039; Ogólne</button>
         <button class="cs-outer-tab"        data-tab="gemini"   onclick="switchTab(this,'gemini')">&#128171; Gemini</button>
         <button class="cs-outer-tab"        data-tab="mistral"  onclick="switchTab(this,'mistral')">&#9889; Mistral</button>
+        <button class="cs-outer-tab"        data-tab="groq"        onclick="switchTab(this,'groq')">&#9889; Groq</button>
+        <button class="cs-outer-tab"        data-tab="openrouter"  onclick="switchTab(this,'openrouter')">&#127760; OpenRouter</button>
         <button class="cs-outer-tab"        data-tab="ollama"   onclick="switchTab(this,'ollama')">&#129302; Ollama</button>
     </div>
 
@@ -45,6 +47,8 @@
                 <div class="provider-quick-btns">
                     <button class="btn-secondary small" onclick="setAllProviders('gemini')">Gemini</button>
                     <button class="btn-secondary small" onclick="setAllProviders('mistral')">Mistral</button>
+                    <button class="btn-secondary small" onclick="setAllProviders('groq')">Groq</button>
+                    <button class="btn-secondary small" onclick="setAllProviders('openrouter')">OpenRouter</button>
                     <button class="btn-secondary small" onclick="setAllProviders('ollama')">Ollama (local)</button>
                 </div>
             </div>
@@ -58,6 +62,8 @@
                         <select id="g-chat-provider" class="setting-input" onchange="onProviderChange('chat')">
                             <option value="gemini">Gemini</option>
                             <option value="mistral">Mistral</option>
+                            <option value="groq">Groq</option>
+                            <option value="openrouter">OpenRouter</option>
                             <option value="ollama">Ollama (local)</option>
                         </select>
                     </div>
@@ -102,6 +108,8 @@
                         <select id="g-memory-provider" class="setting-input" onchange="onProviderChange('memory')">
                             <option value="gemini">Gemini</option>
                             <option value="mistral">Mistral</option>
+                            <option value="groq">Groq</option>
+                            <option value="openrouter">OpenRouter</option>
                             <option value="ollama">Ollama (local)</option>
                         </select>
                     </div>
@@ -131,6 +139,8 @@
                         <select id="g-summary-provider" class="setting-input" onchange="onProviderChange('summary')">
                             <option value="gemini">Gemini</option>
                             <option value="mistral">Mistral</option>
+                            <option value="groq">Groq</option>
+                            <option value="openrouter">OpenRouter</option>
                             <option value="ollama">Ollama (local)</option>
                         </select>
                     </div>
@@ -170,6 +180,8 @@
                 <select id="g-embed-provider" class="setting-input" onchange="onProviderChange('embed')">
                     <option value="gemini">Gemini</option>
                     <option value="mistral">Mistral</option>
+                    <option value="groq">Groq ⚠️ brak embeddings</option>
+                    <option value="openrouter">OpenRouter ⚠️ brak embeddings</option>
                     <option value="ollama">Ollama (local)</option>
                 </select>
             </div>
@@ -382,6 +394,181 @@
             </div>
 
         </div><!-- /mistral panel -->
+
+        <!-- ══════════════ GROQ TAB ══════════════ -->
+        <div class="cs-outer-panel" id="cs-panel-groq">
+
+            <!-- Inner tabs -->
+            <div class="cs-inner-tabs" role="tablist">
+                <button class="cs-inner-tab active" data-inner="groq-general" onclick="switchInnerTab(this,'groq-general')">Ogólne</button>
+                <button class="cs-inner-tab"        data-inner="groq-chat"    onclick="switchInnerTab(this,'groq-chat')">Chat</button>
+                <button class="cs-inner-tab"        data-inner="groq-memory"  onclick="switchInnerTab(this,'groq-memory')">Memory</button>
+                <button class="cs-inner-tab"        data-inner="groq-summary" onclick="switchInnerTab(this,'groq-summary')">Summary</button>
+            </div>
+
+            <!-- Groq > Ogólne (klucze) -->
+            <div class="cs-inner-panel active" id="cs-inner-groq-general">
+                <div class="setting-group">
+                    <label>Klucze API Groq (tego czatu)</label>
+                    <div id="g-groq-api-keys-list" class="api-keys-list"></div>
+                    <div class="api-key-form">
+                        <input type="text"     id="g-new-groq-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                        <input type="password" id="g-new-groq-key-value" class="setting-input" placeholder="Wklej klucz API Groq...">
+                        <button class="btn-secondary" onclick="addGroqApiKey()">Dodaj</button>
+                    </div>
+                    <button class="btn-secondary small" onclick="syncGroqApiKeysFromGlobal()" style="margin-top:8px">
+                        &#8595; Kopiuj z globalnych
+                    </button>
+                    <small style="display:block;margin-top:6px;color:var(--text-secondary)">
+                        Klucze rotują losowo. Przypisane tylko do tego czatu.
+                        Uzyskaj klucz na <a href="https://console.groq.com" target="_blank">console.groq.com</a>.
+                    </small>
+                    <div class="field-hint" style="margin-top:10px;background:var(--bg-tertiary);padding:8px;border-radius:6px;">
+                        ⚠️ <strong>Groq nie obsługuje embeddings.</strong> Jeśli używasz Groq do chatu/memory/summary, ustaw
+                        Embeddings na Gemini lub Ollama.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Groq > Chat model -->
+            <div class="cs-inner-panel" id="cs-inner-groq-chat">
+                <div class="setting-group">
+                    <label for="g-groq-chat-model">Model Groq dla czatu</label>
+                    <select id="g-groq-chat-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID modelu:</span>
+                        <input type="text" id="g-groq-chat-model-custom" class="setting-input" placeholder="llama-3.3-70b-versatile"
+                               oninput="syncCustomModel(this,'g-groq-chat-model')">
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label for="g-groq-chat-model-fallback">Fallback model</label>
+                    <select id="g-groq-chat-model-fallback" class="setting-input"></select>
+                </div>
+            </div>
+
+            <!-- Groq > Memory model -->
+            <div class="cs-inner-panel" id="cs-inner-groq-memory">
+                <div class="setting-group">
+                    <label for="g-groq-memory-model">Model Groq dla memory</label>
+                    <select id="g-groq-memory-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-groq-memory-model-custom" class="setting-input" placeholder="llama-3.1-8b-instant"
+                               oninput="syncCustomModel(this,'g-groq-memory-model')">
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label for="g-groq-memory-model-fallback">Fallback model</label>
+                    <select id="g-groq-memory-model-fallback" class="setting-input"></select>
+                </div>
+            </div>
+
+            <!-- Groq > Summary model -->
+            <div class="cs-inner-panel" id="cs-inner-groq-summary">
+                <div class="setting-group">
+                    <label for="g-groq-summary-model">Model Groq dla summary</label>
+                    <select id="g-groq-summary-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-groq-summary-model-custom" class="setting-input" placeholder="llama-3.1-8b-instant"
+                               oninput="syncCustomModel(this,'g-groq-summary-model')">
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /groq panel -->
+
+        <!-- ══════════════ OPENROUTER TAB ══════════════ -->
+        <div class="cs-outer-panel" id="cs-panel-openrouter">
+
+            <!-- Inner tabs -->
+            <div class="cs-inner-tabs" role="tablist">
+                <button class="cs-inner-tab active" data-inner="or-general" onclick="switchInnerTab(this,'or-general')">Ogólne</button>
+                <button class="cs-inner-tab"        data-inner="or-chat"    onclick="switchInnerTab(this,'or-chat')">Chat</button>
+                <button class="cs-inner-tab"        data-inner="or-memory"  onclick="switchInnerTab(this,'or-memory')">Memory</button>
+                <button class="cs-inner-tab"        data-inner="or-summary" onclick="switchInnerTab(this,'or-summary')">Summary</button>
+            </div>
+
+            <!-- General: API keys -->
+            <div class="cs-inner-panel active" id="cs-inner-or-general">
+                <div class="cs-section-header">&#127760; Klucze API OpenRouter</div>
+                <div class="setting-group">
+                    <p class="field-hint">Klucze OpenRouter możesz wygenerować na <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>. Wklej je tutaj lub skopiuj z ustawień globalnych.</p>
+                    <div id="or-api-keys-list" class="api-keys-list"></div>
+                    <div class="api-key-add-row">
+                        <input type="text"     id="new-or-key-label" class="setting-input" placeholder="Etykieta klucza">
+                        <input type="password" id="new-or-key-value" class="setting-input" placeholder="sk-or-...">
+                        <button class="btn-primary small" onclick="page.addOpenRouterApiKey()">Dodaj</button>
+                    </div>
+                    <div style="margin-top:8px">
+                        <button class="btn-secondary small" onclick="page.syncOpenRouterApiKeysFromGlobal()">Skopiuj z ustawień globalnych</button>
+                    </div>
+                    <p class="field-hint" style="color:var(--warn-color,#e8a000);margin-top:8px">&#9888; OpenRouter nie obsługuje embeddings. Dla zadania Embed użyj Gemini lub Ollama.</p>
+                </div>
+            </div>
+
+            <!-- Chat -->
+            <div class="cs-inner-panel" id="cs-inner-or-chat">
+                <div class="cs-section-header">&#128172; Model Chat</div>
+                <div class="setting-group">
+                    <label for="g-or-chat-model">Model OpenRouter dla chat</label>
+                    <select id="g-or-chat-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-or-chat-model-custom" class="setting-input" placeholder="anthropic/claude-sonnet-4-5"
+                               oninput="syncCustomModel(this,'g-or-chat-model')">
+                    </div>
+                    <div style="margin-top:12px">
+                        <label for="g-or-chat-model-fallback">Model fallback</label>
+                        <select id="g-or-chat-model-fallback" class="setting-input"></select>
+                        <div class="field-hint-row">
+                            <span>lub podaj własny ID:</span>
+                            <input type="text" id="g-or-chat-model-fallback-custom" class="setting-input" placeholder="meta-llama/llama-3.3-70b-instruct"
+                                   oninput="syncCustomModel(this,'g-or-chat-model-fallback')">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Memory -->
+            <div class="cs-inner-panel" id="cs-inner-or-memory">
+                <div class="cs-section-header">&#129504; Model Memory</div>
+                <div class="setting-group">
+                    <label for="g-or-memory-model">Model OpenRouter dla memory</label>
+                    <select id="g-or-memory-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-or-memory-model-custom" class="setting-input" placeholder="meta-llama/llama-3.1-8b-instruct"
+                               oninput="syncCustomModel(this,'g-or-memory-model')">
+                    </div>
+                    <div style="margin-top:12px">
+                        <label for="g-or-memory-model-fallback">Model fallback</label>
+                        <select id="g-or-memory-model-fallback" class="setting-input"></select>
+                        <div class="field-hint-row">
+                            <span>lub podaj własny ID:</span>
+                            <input type="text" id="g-or-memory-model-fallback-custom" class="setting-input" placeholder="google/gemini-flash-1.5"
+                                   oninput="syncCustomModel(this,'g-or-memory-model-fallback')">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Summary -->
+            <div class="cs-inner-panel" id="cs-inner-or-summary">
+                <div class="cs-section-header">&#128203; Model Summary</div>
+                <div class="setting-group">
+                    <label for="g-or-summary-model">Model OpenRouter dla summary</label>
+                    <select id="g-or-summary-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-or-summary-model-custom" class="setting-input" placeholder="meta-llama/llama-3.1-8b-instruct"
+                               oninput="syncCustomModel(this,'g-or-summary-model')">
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /openrouter panel -->
 
         <!-- ══════════════ OLLAMA TAB ══════════════ -->
         <div class="cs-outer-panel" id="cs-panel-ollama">

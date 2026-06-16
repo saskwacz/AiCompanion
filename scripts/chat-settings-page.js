@@ -20,6 +20,14 @@ import {
     MISTRAL_DEFAULTS,
 } from './providers/mistral-models.js';
 import {
+    GROQ_CHAT_LIST, GROQ_MEMORY_LIST, GROQ_SUMMARY_LIST,
+    GROQ_DEFAULTS,
+} from './providers/groq-models.js';
+import {
+    OPENROUTER_CHAT_LIST, OPENROUTER_MEMORY_LIST, OPENROUTER_SUMMARY_LIST,
+    OPENROUTER_DEFAULTS,
+} from './providers/openrouter-models.js';
+import {
     OLLAMA_CHAT_LIST, OLLAMA_MEMORY_LIST, OLLAMA_SUMMARY_LIST, OLLAMA_EMBED_LIST,
     OLLAMA_DEFAULTS,
 } from './providers/ollama-models.js';
@@ -29,8 +37,10 @@ import { rlGetStatusForKey, rlClear } from './providers/index.js';
 // ─── State ────────────────────────────────────────────────────────────────────
 const params  = new URLSearchParams(window.location.search);
 const chatId  = params.get('chatId') ? parseInt(params.get('chatId')) : null;
-let   apiKeys        = [];   // Gemini keys for this chat
-let   mistralApiKeys = [];   // Mistral keys for this chat
+let   apiKeys           = [];   // Gemini keys for this chat
+let   mistralApiKeys    = [];   // Mistral keys for this chat
+let   groqApiKeys       = [];   // Groq keys for this chat
+let   openrouterApiKeys = [];   // OpenRouter keys for this chat
 let   globalSettings = {};
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -91,6 +101,14 @@ function populateForm(cfg) {
     mistralApiKeys = [...(cfg.mistralApiKeys || [])];
     renderMistralApiKeysList();
 
+    // ── Per-chat Groq API keys ──
+    groqApiKeys = [...(cfg.groqApiKeys || [])];
+    renderGroqApiKeysList();
+
+    // ── Per-chat OpenRouter API keys ──
+    openrouterApiKeys = [...(cfg.openrouterApiKeys || [])];
+    renderOpenRouterApiKeysList();
+
     // Note: model dropdowns are filled by fillModelDropdowns() after this
     window._pendingGeminiModels = {
         chat:          cfg.chat.geminiModel             || GEMINI_DEFAULTS.chat.geminiModel,
@@ -102,6 +120,14 @@ function populateForm(cfg) {
         embed:         cfg.embed.geminiModel            || GEMINI_DEFAULTS.embed.geminiModel,
     };
 
+    window._pendingGroqModels = {
+        chat:         cfg.chat.groqModel             || GROQ_DEFAULTS.chat.groqModel,
+        chatFallback: cfg.chat.groqModelFallback     ?? GROQ_DEFAULTS.chat.groqModelFallback,
+        memory:       cfg.memory.groqModel           || GROQ_DEFAULTS.memory.groqModel,
+        memFallback:  cfg.memory.groqModelFallback   ?? GROQ_DEFAULTS.memory.groqModelFallback,
+        summary:      cfg.summary.groqModel          || GROQ_DEFAULTS.summary.groqModel,
+    };
+
     window._pendingMistralModels = {
         chat:         cfg.chat.mistralModel             || MISTRAL_DEFAULTS.chat.mistralModel,
         chatFallback: cfg.chat.mistralModelFallback     ?? MISTRAL_DEFAULTS.chat.mistralModelFallback,
@@ -110,6 +136,14 @@ function populateForm(cfg) {
         summary:      cfg.summary.mistralModel          || MISTRAL_DEFAULTS.summary.mistralModel,
         sumFallback:  cfg.summary.mistralModelFallback  ?? null,
         embed:        cfg.embed.mistralModel            || MISTRAL_DEFAULTS.embed.mistralModel,
+    };
+
+    window._pendingOpenRouterModels = {
+        chat:         cfg.chat.openrouterModel             || OPENROUTER_DEFAULTS.chat.openrouterModel,
+        chatFallback: cfg.chat.openrouterModelFallback     ?? OPENROUTER_DEFAULTS.chat.openrouterModelFallback,
+        memory:       cfg.memory.openrouterModel           || OPENROUTER_DEFAULTS.memory.openrouterModel,
+        memFallback:  cfg.memory.openrouterModelFallback   ?? OPENROUTER_DEFAULTS.memory.openrouterModelFallback,
+        summary:      cfg.summary.openrouterModel          || OPENROUTER_DEFAULTS.summary.openrouterModel,
     };
 }
 
@@ -125,6 +159,14 @@ function fillModelDropdowns() {
     buildFallbackSelect('g-gemini-memory-model-fallback',  GEMINI_MEMORY_LIST,  pg.memFallback);
     buildFallbackSelect('g-gemini-summary-model-fallback', GEMINI_SUMMARY_LIST, pg.sumFallback);
 
+    // ── Groq ──
+    const pq = window._pendingGroqModels || {};
+    buildModelSelect('g-groq-chat-model',    GROQ_CHAT_LIST,    pq.chat,    'g-groq-chat-model-custom');
+    buildModelSelect('g-groq-memory-model',  GROQ_MEMORY_LIST,  pq.memory,  'g-groq-memory-model-custom');
+    buildModelSelect('g-groq-summary-model', GROQ_SUMMARY_LIST, pq.summary, 'g-groq-summary-model-custom');
+    buildFallbackSelect('g-groq-chat-model-fallback',   GROQ_CHAT_LIST,   pq.chatFallback);
+    buildFallbackSelect('g-groq-memory-model-fallback', GROQ_MEMORY_LIST, pq.memFallback);
+
     // ── Mistral ──
     const pm = window._pendingMistralModels || {};
     buildModelSelect('g-mistral-chat-model',    MISTRAL_CHAT_LIST,    pm.chat,    'g-mistral-chat-model-custom');
@@ -133,6 +175,14 @@ function fillModelDropdowns() {
     buildModelSelect('g-mistral-embed-model',   MISTRAL_EMBED_LIST,   pm.embed,   'g-mistral-embed-model-custom');
     buildFallbackSelect('g-mistral-chat-model-fallback',   MISTRAL_CHAT_LIST,   pm.chatFallback);
     buildFallbackSelect('g-mistral-memory-model-fallback', MISTRAL_MEMORY_LIST, pm.memFallback);
+
+    // ── OpenRouter ──
+    const por = window._pendingOpenRouterModels || {};
+    buildModelSelect('g-or-chat-model',    OPENROUTER_CHAT_LIST,    por.chat,    'g-or-chat-model-custom');
+    buildModelSelect('g-or-memory-model',  OPENROUTER_MEMORY_LIST,  por.memory,  'g-or-memory-model-custom');
+    buildModelSelect('g-or-summary-model', OPENROUTER_SUMMARY_LIST, por.summary, 'g-or-summary-model-custom');
+    buildFallbackSelect('g-or-chat-model-fallback',   OPENROUTER_CHAT_LIST,   por.chatFallback);
+    buildFallbackSelect('g-or-memory-model-fallback', OPENROUTER_MEMORY_LIST, por.memFallback);
 }
 
 function buildModelSelect(selectId, list, currentModel, customInputId) {
@@ -372,6 +422,53 @@ window.removeMistralApiKey = function(idx) {
     renderMistralApiKeysList();
 };
 
+// ── Groq API Keys ─────────────────────────────────────────────────────────────
+function renderGroqApiKeysList() {
+    const list = document.getElementById('g-groq-api-keys-list');
+    if (!list) return;
+
+    if (!groqApiKeys.length) {
+        list.innerHTML = '<p class="no-keys">Brak kluczy — dodaj lub skopiuj z globalnych</p>';
+        return;
+    }
+
+    list.innerHTML = groqApiKeys.map((k, i) => `
+        <div class="api-key-item">
+            <div class="api-key-main">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="removeGroqApiKey(${i})">Usuń</button>
+            </div>
+        </div>`).join('');
+}
+
+window.addGroqApiKey = function() {
+    const labelEl = document.getElementById('g-new-groq-key-label');
+    const keyEl   = document.getElementById('g-new-groq-key-value');
+    const key     = keyEl?.value.trim();
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+    groqApiKeys = [...groqApiKeys, { label: labelEl?.value.trim() || `Key ${groqApiKeys.length + 1}`, key }];
+    if (labelEl) labelEl.value = '';
+    if (keyEl)   keyEl.value   = '';
+    renderGroqApiKeysList();
+};
+
+window.removeGroqApiKey = function(idx) {
+    if (!confirm('Usunąć ten klucz Groq z czatu?')) return;
+    groqApiKeys = groqApiKeys.filter((_, i) => i !== idx);
+    renderGroqApiKeysList();
+};
+
+window.syncGroqApiKeysFromGlobal = function() {
+    const global = globalSettings.groqApiKeys || [];
+    if (!global.length) { showToast('Brak globalnych kluczy Groq', 'info'); return; }
+    const existing = new Set(groqApiKeys.map(k => k.key));
+    const added    = global.filter(k => !existing.has(k.key));
+    groqApiKeys = [...groqApiKeys, ...added];
+    renderGroqApiKeysList();
+    showToast(`Skopiowano ${added.length} klucz(y) Groq`, 'success');
+};
+
 window.syncMistralApiKeysFromGlobal = function() {
     const global = globalSettings.mistralApiKeys || [];
     if (!global.length) { showToast('Brak globalnych kluczy Mistral', 'info'); return; }
@@ -381,6 +478,52 @@ window.syncMistralApiKeysFromGlobal = function() {
     renderMistralApiKeysList();
     showToast(`Skopiowano ${added.length} klucz(y) Mistral`, 'success');
 };
+
+// ── OpenRouter key management ──
+function renderOpenRouterApiKeysList() {
+    const list = document.getElementById('or-api-keys-list');
+    if (!list) return;
+    list.innerHTML = openrouterApiKeys.length
+        ? openrouterApiKeys.map((k, i) => `
+            <div class="api-key-item">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="page.removeOpenRouterApiKey(${i})">Usuń</button>
+            </div>`).join('')
+        : '<p class="no-keys">Brak kluczy</p>';
+}
+
+window.page = window.page || {};
+
+Object.assign(window.page, {
+    addOpenRouterApiKey() {
+        const labelEl = document.getElementById('new-or-key-label');
+        const keyEl   = document.getElementById('new-or-key-value');
+        const key     = keyEl?.value.trim();
+        if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+        openrouterApiKeys = [...openrouterApiKeys, {
+            label: labelEl?.value.trim() || `Key ${openrouterApiKeys.length + 1}`,
+            key,
+        }];
+        if (labelEl) labelEl.value = '';
+        if (keyEl)   keyEl.value   = '';
+        renderOpenRouterApiKeysList();
+    },
+    removeOpenRouterApiKey(idx) {
+        if (!confirm('Usunąć ten klucz?')) return;
+        openrouterApiKeys = openrouterApiKeys.filter((_, i) => i !== idx);
+        renderOpenRouterApiKeysList();
+    },
+    syncOpenRouterApiKeysFromGlobal() {
+        const global = globalSettings.openrouterApiKeys || [];
+        if (!global.length) { showToast('Brak globalnych kluczy OpenRouter', 'info'); return; }
+        const existing = new Set(openrouterApiKeys.map(k => k.key));
+        const added    = global.filter(k => !existing.has(k.key));
+        openrouterApiKeys = [...openrouterApiKeys, ...added];
+        renderOpenRouterApiKeysList();
+        showToast(`Skopiowano ${added.length} klucz(y) OpenRouter`, 'success');
+    },
+});
 
 // ─── Collect form → config ────────────────────────────────────────────────────
 function collectConfig() {
@@ -398,39 +541,55 @@ function collectConfig() {
             geminiModelFallback:  document.getElementById('g-gemini-chat-model-fallback')?.value || null,
             mistralModel:         str('g-mistral-chat-model',  MISTRAL_DEFAULTS.chat.mistralModel),
             mistralModelFallback: document.getElementById('g-mistral-chat-model-fallback')?.value || null,
-            ollamaModel:          str('g-ollama-chat-model',   OLLAMA_DEFAULTS.chat.ollamaModel),
+            groqModel:              str('g-groq-chat-model',       GROQ_DEFAULTS.chat.groqModel),
+            groqModelFallback:      document.getElementById('g-groq-chat-model-fallback')?.value || null,
+            openrouterModel:        str('g-or-chat-model',         OPENROUTER_DEFAULTS.chat.openrouterModel),
+            openrouterModelFallback: document.getElementById('g-or-chat-model-fallback')?.value || null,
+            ollamaModel:            str('g-ollama-chat-model',     OLLAMA_DEFAULTS.chat.ollamaModel),
         },
         memory: {
-            provider:             str('g-memory-provider',    'gemini'),
-            temperature:          pf ('g-memory-temp',        0.1),
-            maxTokens:            pi ('g-memory-max-tokens',  8192),
-            geminiModel:          str('g-gemini-memory-model',  GEMINI_DEFAULTS.memory.geminiModel),
-            geminiModelFallback:  document.getElementById('g-gemini-memory-model-fallback')?.value || null,
-            mistralModel:         str('g-mistral-memory-model', MISTRAL_DEFAULTS.memory.mistralModel),
-            mistralModelFallback: document.getElementById('g-mistral-memory-model-fallback')?.value || null,
-            ollamaModel:          str('g-ollama-memory-model',  OLLAMA_DEFAULTS.memory.ollamaModel),
+            provider:               str('g-memory-provider',    'gemini'),
+            temperature:            pf ('g-memory-temp',        0.1),
+            maxTokens:              pi ('g-memory-max-tokens',  8192),
+            geminiModel:            str('g-gemini-memory-model',  GEMINI_DEFAULTS.memory.geminiModel),
+            geminiModelFallback:    document.getElementById('g-gemini-memory-model-fallback')?.value || null,
+            mistralModel:           str('g-mistral-memory-model', MISTRAL_DEFAULTS.memory.mistralModel),
+            mistralModelFallback:   document.getElementById('g-mistral-memory-model-fallback')?.value || null,
+            groqModel:              str('g-groq-memory-model',    GROQ_DEFAULTS.memory.groqModel),
+            groqModelFallback:      document.getElementById('g-groq-memory-model-fallback')?.value || null,
+            openrouterModel:        str('g-or-memory-model',      OPENROUTER_DEFAULTS.memory.openrouterModel),
+            openrouterModelFallback: document.getElementById('g-or-memory-model-fallback')?.value || null,
+            ollamaModel:            str('g-ollama-memory-model',  OLLAMA_DEFAULTS.memory.ollamaModel),
         },
         summary: {
-            provider:             str('g-summary-provider',    'gemini'),
-            temperature:          pf ('g-summary-temp',        0.3),
-            maxTokens:            pi ('g-summary-max-tokens',  8192),
-            everyN:               pi ('g-summary-every',       10),
-            geminiModel:          str('g-gemini-summary-model',  GEMINI_DEFAULTS.summary.geminiModel),
-            geminiModelFallback:  document.getElementById('g-gemini-summary-model-fallback')?.value || null,
-            mistralModel:         str('g-mistral-summary-model', MISTRAL_DEFAULTS.summary.mistralModel),
-            mistralModelFallback: null,
-            ollamaModel:          str('g-ollama-summary-model',  OLLAMA_DEFAULTS.summary.ollamaModel),
+            provider:               str('g-summary-provider',    'gemini'),
+            temperature:            pf ('g-summary-temp',        0.3),
+            maxTokens:              pi ('g-summary-max-tokens',  8192),
+            everyN:                 pi ('g-summary-every',       10),
+            geminiModel:            str('g-gemini-summary-model',  GEMINI_DEFAULTS.summary.geminiModel),
+            geminiModelFallback:    document.getElementById('g-gemini-summary-model-fallback')?.value || null,
+            mistralModel:           str('g-mistral-summary-model', MISTRAL_DEFAULTS.summary.mistralModel),
+            mistralModelFallback:   null,
+            groqModel:              str('g-groq-summary-model',    GROQ_DEFAULTS.summary.groqModel),
+            groqModelFallback:      null,
+            openrouterModel:        str('g-or-summary-model',     OPENROUTER_DEFAULTS.summary.openrouterModel),
+            openrouterModelFallback: null,
+            ollamaModel:            str('g-ollama-summary-model',  OLLAMA_DEFAULTS.summary.ollamaModel),
         },
         embed: {
-            provider:    str('g-embed-provider',    'gemini'),
-            geminiModel: str('g-gemini-embed-model',  GEMINI_DEFAULTS.embed.geminiModel),
-            mistralModel: str('g-mistral-embed-model', MISTRAL_DEFAULTS.embed.mistralModel),
-            ollamaModel: str('g-ollama-embed-model',  OLLAMA_DEFAULTS.embed.ollamaModel),
+            provider:              str('g-embed-provider',    'gemini'),
+            geminiModel:           str('g-gemini-embed-model',  GEMINI_DEFAULTS.embed.geminiModel),
+            mistralModel:          str('g-mistral-embed-model', MISTRAL_DEFAULTS.embed.mistralModel),
+            groqModel:             null,        // Groq has no embeddings
+            openrouterModel:       null,        // OpenRouter has no embeddings
+            ollamaModel:           str('g-ollama-embed-model',  OLLAMA_DEFAULTS.embed.ollamaModel),
         },
-        ollamaBaseUrl:  str('g-ollama-url', 'http://localhost:11434'),
-        apiKeys:        [...apiKeys],
-        mistralApiKeys: [...mistralApiKeys],
-        chatLang:       str('g-chat-lang', 'pl'),
+        ollamaBaseUrl:     str('g-ollama-url', 'http://localhost:11434'),
+        apiKeys:           [...apiKeys],
+        mistralApiKeys:    [...mistralApiKeys],
+        groqApiKeys:       [...groqApiKeys],
+        openrouterApiKeys: [...openrouterApiKeys],
+        chatLang:          str('g-chat-lang', 'pl'),
     };
 }
 

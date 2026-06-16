@@ -1,6 +1,7 @@
 import { openDB }                                                      from './db.js';
 import { loadSettings, persistSettings, getShuffledApiKeys,
-         getShuffledMistralApiKeys }                                    from './settings.js';
+         getShuffledMistralApiKeys, getShuffledGroqApiKeys,
+         getShuffledOpenRouterApiKeys }                                 from './settings.js';
 import { getCharacterById, getAllCharacters,
          getCharacterAvatar }                                           from './characters.js';
 import { callChatAPI, buildSystemPrompt, AllModelsRateLimitedError } from './providers/index.js';
@@ -55,6 +56,14 @@ function getProviderConfig(role = 'chat') {
         model         = taskCfg.mistralModel || null;
         modelFallback = taskCfg.mistralModelFallback || null;
         keys          = getShuffledMistralApiKeys(cfg);
+    } else if (provider === 'groq') {
+        model         = taskCfg.groqModel || null;
+        modelFallback = taskCfg.groqModelFallback || null;
+        keys          = getShuffledGroqApiKeys(cfg);
+    } else if (provider === 'openrouter') {
+        model         = taskCfg.openrouterModel || null;
+        modelFallback = taskCfg.openrouterModelFallback || null;
+        keys          = getShuffledOpenRouterApiKeys(cfg);
     } else {
         // gemini (default)
         model         = taskCfg.geminiModel || null;
@@ -80,7 +89,8 @@ function getTaskCfg(role) {
 
 /** Build initial chat config for a new chat, seeded with global API keys. */
 function buildDefaultChatConfig() {
-    return _buildDefault(settings.apiKeys, settings.ollamaBaseUrl, settings.mistralApiKeys);
+    return _buildDefault(settings.apiKeys, settings.ollamaBaseUrl, settings.mistralApiKeys, settings.groqApiKeys, settings.openrouterApiKeys);
+
 }
 
 // ============ STATE ============
@@ -328,6 +338,12 @@ async function appSendMessage(retryText) {
     }
     if (chatCfg.provider === 'mistral' && !chatCfg.keys.length) {
         showToast('Dodaj klucz API Mistral w ustawieniach czatu', 'error'); return;
+    }
+    if (chatCfg.provider === 'groq'       && !chatCfg.keys.length) {
+        showToast('Dodaj klucz API Groq w ustawieniach czatu', 'error'); return;
+    }
+    if (chatCfg.provider === 'openrouter' && !chatCfg.keys.length) {
+        showToast('Dodaj klucz API OpenRouter w ustawieniach czatu', 'error'); return;
     }
 
     // On retry: the user message may already be saved in DB (from a previous failed attempt).
@@ -769,6 +785,8 @@ async function openSettings() {
 
     renderApiKeysList();
     renderMistralApiKeysList();
+    renderGroqApiKeysList();
+    renderOpenRouterApiKeysList();
     openModal('settings-modal');
 }
 
@@ -835,6 +853,72 @@ function removeMistralApiKey(idx) {
     if (!confirm('Usunąć ten klucz?')) return;
     settings.mistralApiKeys = settings.mistralApiKeys.filter((_, i) => i !== idx);
     renderMistralApiKeysList();
+}
+
+// ── Groq global keys ──
+function renderGroqApiKeysList() {
+    const list = document.getElementById('groq-api-keys-list');
+    if (!list) return;
+    const keys = settings.groqApiKeys || [];
+    list.innerHTML = keys.length
+        ? keys.map((k, i) => `
+            <div class="api-key-item">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="app.removeGroqApiKey(${i})">Usuń</button>
+            </div>`).join('')
+        : '<p class="no-keys">Brak kluczy</p>';
+}
+
+function addGroqApiKeyRow() {
+    const labelEl = document.getElementById('new-groq-key-label');
+    const keyEl   = document.getElementById('new-groq-key-value');
+    const key     = keyEl?.value.trim();
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+    settings.groqApiKeys = [...(settings.groqApiKeys || []),
+        { label: labelEl?.value.trim() || `Key ${(settings.groqApiKeys?.length || 0) + 1}`, key }];
+    if (labelEl) labelEl.value = '';
+    if (keyEl)   keyEl.value   = '';
+    renderGroqApiKeysList();
+}
+
+function removeGroqApiKey(idx) {
+    if (!confirm('Usunąć ten klucz?')) return;
+    settings.groqApiKeys = settings.groqApiKeys.filter((_, i) => i !== idx);
+    renderGroqApiKeysList();
+}
+
+// ── OpenRouter global keys ──
+function renderOpenRouterApiKeysList() {
+    const list = document.getElementById('openrouter-api-keys-list');
+    if (!list) return;
+    const keys = settings.openrouterApiKeys || [];
+    list.innerHTML = keys.length
+        ? keys.map((k, i) => `
+            <div class="api-key-item">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="app.removeOpenRouterApiKey(${i})">Usuń</button>
+            </div>`).join('')
+        : '<p class="no-keys">Brak kluczy</p>';
+}
+
+function addOpenRouterApiKeyRow() {
+    const labelEl = document.getElementById('new-openrouter-key-label');
+    const keyEl   = document.getElementById('new-openrouter-key-value');
+    const key     = keyEl?.value.trim();
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+    settings.openrouterApiKeys = [...(settings.openrouterApiKeys || []),
+        { label: labelEl?.value.trim() || `Key ${(settings.openrouterApiKeys?.length || 0) + 1}`, key }];
+    if (labelEl) labelEl.value = '';
+    if (keyEl)   keyEl.value   = '';
+    renderOpenRouterApiKeysList();
+}
+
+function removeOpenRouterApiKey(idx) {
+    if (!confirm('Usunąć ten klucz?')) return;
+    settings.openrouterApiKeys = settings.openrouterApiKeys.filter((_, i) => i !== idx);
+    renderOpenRouterApiKeysList();
 }
 
 async function handleSaveSettings() {
@@ -963,6 +1047,10 @@ window.app = {
     removeApiKey,
     addMistralApiKeyRow,
     removeMistralApiKey,
+    addGroqApiKeyRow,
+    removeGroqApiKey,
+    addOpenRouterApiKeyRow,
+    removeOpenRouterApiKey,
 
     openChatSettings:         navigateToChatSettings,
     openCharacterEditor:      charId => navigateToCharEditor(charId),
