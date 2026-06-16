@@ -30,6 +30,7 @@
     <div class="cs-outer-tabs" role="tablist">
         <button class="cs-outer-tab active" data-tab="general"  onclick="switchTab(this,'general')">&#9881;&#65039; Ogólne</button>
         <button class="cs-outer-tab"        data-tab="gemini"   onclick="switchTab(this,'gemini')">&#128171; Gemini</button>
+        <button class="cs-outer-tab"        data-tab="mistral"  onclick="switchTab(this,'mistral')">&#9889; Mistral</button>
         <button class="cs-outer-tab"        data-tab="ollama"   onclick="switchTab(this,'ollama')">&#129302; Ollama</button>
     </div>
 
@@ -43,6 +44,7 @@
                 <label>Ustaw wszystkich na:</label>
                 <div class="provider-quick-btns">
                     <button class="btn-secondary small" onclick="setAllProviders('gemini')">Gemini</button>
+                    <button class="btn-secondary small" onclick="setAllProviders('mistral')">Mistral</button>
                     <button class="btn-secondary small" onclick="setAllProviders('ollama')">Ollama (local)</button>
                 </div>
             </div>
@@ -55,6 +57,7 @@
                         <label for="g-chat-provider">Dostawca</label>
                         <select id="g-chat-provider" class="setting-input" onchange="onProviderChange('chat')">
                             <option value="gemini">Gemini</option>
+                            <option value="mistral">Mistral</option>
                             <option value="ollama">Ollama (local)</option>
                         </select>
                     </div>
@@ -98,6 +101,7 @@
                         <label for="g-memory-provider">Dostawca</label>
                         <select id="g-memory-provider" class="setting-input" onchange="onProviderChange('memory')">
                             <option value="gemini">Gemini</option>
+                            <option value="mistral">Mistral</option>
                             <option value="ollama">Ollama (local)</option>
                         </select>
                     </div>
@@ -126,6 +130,7 @@
                         <label for="g-summary-provider">Dostawca</label>
                         <select id="g-summary-provider" class="setting-input" onchange="onProviderChange('summary')">
                             <option value="gemini">Gemini</option>
+                            <option value="mistral">Mistral</option>
                             <option value="ollama">Ollama (local)</option>
                         </select>
                     </div>
@@ -164,6 +169,7 @@
                 <label for="g-embed-provider">Dostawca</label>
                 <select id="g-embed-provider" class="setting-input" onchange="onProviderChange('embed')">
                     <option value="gemini">Gemini</option>
+                    <option value="mistral">Mistral</option>
                     <option value="ollama">Ollama (local)</option>
                 </select>
             </div>
@@ -282,6 +288,100 @@
             </div>
 
         </div><!-- /gemini panel -->
+
+        <!-- ══════════════ MISTRAL TAB ══════════════ -->
+        <div class="cs-outer-panel" id="cs-panel-mistral">
+
+            <!-- Inner tabs -->
+            <div class="cs-inner-tabs" role="tablist">
+                <button class="cs-inner-tab active" data-inner="mistral-general" onclick="switchInnerTab(this,'mistral-general')">Ogólne</button>
+                <button class="cs-inner-tab"        data-inner="mistral-chat"    onclick="switchInnerTab(this,'mistral-chat')">Chat</button>
+                <button class="cs-inner-tab"        data-inner="mistral-memory"  onclick="switchInnerTab(this,'mistral-memory')">Memory</button>
+                <button class="cs-inner-tab"        data-inner="mistral-summary" onclick="switchInnerTab(this,'mistral-summary')">Summary</button>
+                <button class="cs-inner-tab"        data-inner="mistral-embed"   onclick="switchInnerTab(this,'mistral-embed')">Embeddings</button>
+            </div>
+
+            <!-- Mistral > Ogólne (klucze) -->
+            <div class="cs-inner-panel active" id="cs-inner-mistral-general">
+                <div class="setting-group">
+                    <label>Klucze API Mistral (tego czatu)</label>
+                    <div id="g-mistral-api-keys-list" class="api-keys-list"></div>
+                    <div class="api-key-form">
+                        <input type="text"     id="g-new-mistral-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                        <input type="password" id="g-new-mistral-key-value" class="setting-input" placeholder="Wklej klucz API Mistral...">
+                        <button class="btn-secondary" onclick="addMistralApiKey()">Dodaj</button>
+                    </div>
+                    <button class="btn-secondary small" onclick="syncMistralApiKeysFromGlobal()" style="margin-top:8px">
+                        &#8595; Kopiuj z globalnych
+                    </button>
+                    <small style="display:block;margin-top:6px;color:var(--text-secondary)">
+                        Klucze rotują losowo. Przypisane tylko do tego czatu.
+                        Uzyskaj klucz na <a href="https://console.mistral.ai" target="_blank">console.mistral.ai</a>.
+                    </small>
+                </div>
+            </div>
+
+            <!-- Mistral > Chat model -->
+            <div class="cs-inner-panel" id="cs-inner-mistral-chat">
+                <div class="setting-group">
+                    <label for="g-mistral-chat-model">Model Mistral dla czatu</label>
+                    <select id="g-mistral-chat-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID modelu:</span>
+                        <input type="text" id="g-mistral-chat-model-custom" class="setting-input" placeholder="mistral-large-latest"
+                               oninput="syncCustomModel(this,'g-mistral-chat-model')">
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label for="g-mistral-chat-model-fallback">Fallback model</label>
+                    <select id="g-mistral-chat-model-fallback" class="setting-input"></select>
+                </div>
+            </div>
+
+            <!-- Mistral > Memory model -->
+            <div class="cs-inner-panel" id="cs-inner-mistral-memory">
+                <div class="setting-group">
+                    <label for="g-mistral-memory-model">Model Mistral dla memory</label>
+                    <select id="g-mistral-memory-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-mistral-memory-model-custom" class="setting-input" placeholder="mistral-small-latest"
+                               oninput="syncCustomModel(this,'g-mistral-memory-model')">
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label for="g-mistral-memory-model-fallback">Fallback model</label>
+                    <select id="g-mistral-memory-model-fallback" class="setting-input"></select>
+                </div>
+            </div>
+
+            <!-- Mistral > Summary model -->
+            <div class="cs-inner-panel" id="cs-inner-mistral-summary">
+                <div class="setting-group">
+                    <label for="g-mistral-summary-model">Model Mistral dla summary</label>
+                    <select id="g-mistral-summary-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-mistral-summary-model-custom" class="setting-input" placeholder="mistral-small-latest"
+                               oninput="syncCustomModel(this,'g-mistral-summary-model')">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mistral > Embeddings model -->
+            <div class="cs-inner-panel" id="cs-inner-mistral-embed">
+                <div class="setting-group">
+                    <label for="g-mistral-embed-model">Model Mistral dla embeddings</label>
+                    <select id="g-mistral-embed-model" class="setting-input"></select>
+                    <div class="field-hint-row">
+                        <span>lub podaj własny ID:</span>
+                        <input type="text" id="g-mistral-embed-model-custom" class="setting-input" placeholder="mistral-embed"
+                               oninput="syncCustomModel(this,'g-mistral-embed-model')">
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /mistral panel -->
 
         <!-- ══════════════ OLLAMA TAB ══════════════ -->
         <div class="cs-outer-panel" id="cs-panel-ollama">

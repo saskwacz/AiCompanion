@@ -8,15 +8,15 @@
  * getProviderConfig() in main.js:
  *
  *   {
- *     provider:  'gemini' | 'ollama'
- *     keys:      [{label, key}, …]     // Gemini API keys (ignored for Ollama)
- *     ollamaUrl: 'http://…'            // Ollama base URL (ignored for Gemini)
+ *     provider:  'gemini' | 'ollama' | 'mistral'
+ *     keys:      [{label, key}, …]     // Gemini/Mistral API keys (ignored for Ollama)
+ *     ollamaUrl: 'http://…'            // Ollama base URL (ignored for Gemini/Mistral)
  *     model:     'model-id' | null     // per-role model override (null = provider default)
  *   }
  *
  * ADDING A NEW PROVIDER
  * ──────────────────────
- * 1. Create providers/groq.js + providers/groq-prompts.js + providers/groq-models.js
+ * 1. Create providers/foo.js + providers/foo-prompts.js + providers/foo-models.js
  * 2. Add one entry to PROVIDERS below.
  * 3. Add the new provider name to settings.js PROVIDER_NAMES and the UI select.
  */
@@ -44,6 +44,24 @@ import {
     buildSummaryPrompt      as geminiBuildSummaryPrompt,
     selectChatMessages      as geminiSelectChatMessages,
 } from './gemini-prompts.js';
+
+// ─── Mistral ───────────────────────────────────────────────────────────────────
+import {
+    callMistralAPI,
+    callMistralForMemory,
+    callMistralForSummary,
+    embedText      as mistralEmbedText,
+    embedContents  as mistralEmbedContents,
+    parseMemoryJson as mistralParseMemoryJson,
+} from './mistral.js';
+
+import {
+    buildSystemPrompt       as mistralBuildSystemPrompt,
+    buildMemoryUpdatePrompt as mistralBuildMemoryUpdatePrompt,
+    buildMemorySeedPrompt   as mistralBuildMemorySeedPrompt,
+    buildSummaryPrompt      as mistralBuildSummaryPrompt,
+    selectChatMessages      as mistralSelectChatMessages,
+} from './mistral-prompts.js';
 
 // ─── Ollama ────────────────────────────────────────────────────────────────────
 import {
@@ -91,6 +109,31 @@ const PROVIDERS = {
         buildMemorySeedPrompt:   (lang, character) => geminiBuildMemorySeedPrompt(lang, character),
         buildSummaryPrompt:      (lang, opts) => geminiBuildSummaryPrompt(lang, opts),
         selectChatMessages:      geminiSelectChatMessages,
+    },
+
+    mistral: {
+        callChat: ({ messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, keys, model, modelFallback }) =>
+            callMistralAPI({ apiKey: keys, messages, systemPrompt, chatSummary, temperature, maxTokens, contextTokens, chatModel: model, chatModelFallback: modelFallback }),
+
+        callMemory: ({ prompt, maxOutputTokens, keys, priority, model, modelFallback }) =>
+            callMistralForMemory({ prompt, apiKey: keys, maxOutputTokens, priority, memoryModel: model, memoryModelFallback: modelFallback }),
+
+        callSummary: ({ prompt, maxOutputTokens, keys, model, modelFallback }) =>
+            callMistralForSummary({ prompt, apiKey: keys, maxOutputTokens, summaryModel: model, summaryModelFallback: modelFallback }),
+
+        embedText: ({ text, keys, model }) =>
+            mistralEmbedText({ apiKey: keys, text, embedModel: model }),
+
+        embedContents: ({ texts, keys, model }) =>
+            mistralEmbedContents({ apiKey: keys, texts, embedModel: model }),
+
+        parseMemoryJson: mistralParseMemoryJson,
+
+        buildSystemPrompt:       (lang, character, memCtx) => mistralBuildSystemPrompt(lang, character, memCtx),
+        buildMemoryUpdatePrompt: (lang, existing, character, recentMessages, userMsg, aiMsg) => mistralBuildMemoryUpdatePrompt(lang, existing, character, recentMessages, userMsg, aiMsg),
+        buildMemorySeedPrompt:   (lang, character) => mistralBuildMemorySeedPrompt(lang, character),
+        buildSummaryPrompt:      (lang, opts) => mistralBuildSummaryPrompt(lang, opts),
+        selectChatMessages:      mistralSelectChatMessages,
     },
 
     ollama: {

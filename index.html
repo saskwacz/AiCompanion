@@ -142,6 +142,20 @@
                 <small>Klucze rotują losowo. Kopiowane automatycznie do nowych chatów.</small>
             </div>
 
+            <div class="settings-section-header">&#9889; Mistral — klucze API</div>
+            <div class="setting-group">
+                <label>Klucze API (Mistral AI)</label>
+                <div id="mistral-api-keys-list" class="api-keys-list"></div>
+                <div class="api-key-form">
+                    <input type="text"     id="new-mistral-key-label" class="setting-input" placeholder="Etykieta (np. Konto 1)">
+                    <input type="password" id="new-mistral-key-value" class="setting-input" placeholder="Wklej klucz API Mistral...">
+                    <button class="btn-secondary" onclick="app.addMistralApiKeyRow()">Dodaj</button>
+                </div>
+                <small>Klucze rotują losowo. Kopiowane automatycznie do nowych chatów.
+                    Uzyskaj na <a href="https://console.mistral.ai" target="_blank">console.mistral.ai</a>.
+                </small>
+            </div>
+
             <div class="settings-section-header">&#129302; Ollama — domyślny URL</div>
             <div class="setting-group">
                 <label for="ollama-base-url">URL Ollama (domyślny dla nowych chatów)</label>

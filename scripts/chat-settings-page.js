@@ -16,6 +16,10 @@ import {
     GEMINI_DEFAULTS,
 } from './providers/gemini-models.js';
 import {
+    MISTRAL_CHAT_LIST, MISTRAL_MEMORY_LIST, MISTRAL_SUMMARY_LIST, MISTRAL_EMBED_LIST,
+    MISTRAL_DEFAULTS,
+} from './providers/mistral-models.js';
+import {
     OLLAMA_CHAT_LIST, OLLAMA_MEMORY_LIST, OLLAMA_SUMMARY_LIST, OLLAMA_EMBED_LIST,
     OLLAMA_DEFAULTS,
 } from './providers/ollama-models.js';
@@ -25,7 +29,8 @@ import { rlGetStatusForKey, rlClear } from './providers/index.js';
 // ─── State ────────────────────────────────────────────────────────────────────
 const params  = new URLSearchParams(window.location.search);
 const chatId  = params.get('chatId') ? parseInt(params.get('chatId')) : null;
-let   apiKeys = [];   // current per-chat api keys
+let   apiKeys        = [];   // Gemini keys for this chat
+let   mistralApiKeys = [];   // Mistral keys for this chat
 let   globalSettings = {};
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -82,8 +87,11 @@ function populateForm(cfg) {
     apiKeys = [...(cfg.apiKeys || [])];
     renderApiKeysList();
 
-    // Note: Gemini model dropdowns are filled by fillModelDropdowns() after this
-    // store current gemini models to select them in the dropdowns
+    // ── Per-chat Mistral API keys ──
+    mistralApiKeys = [...(cfg.mistralApiKeys || [])];
+    renderMistralApiKeysList();
+
+    // Note: model dropdowns are filled by fillModelDropdowns() after this
     window._pendingGeminiModels = {
         chat:          cfg.chat.geminiModel             || GEMINI_DEFAULTS.chat.geminiModel,
         chatFallback:  cfg.chat.geminiModelFallback     ?? GEMINI_DEFAULTS.chat.geminiModelFallback,
@@ -93,20 +101,38 @@ function populateForm(cfg) {
         sumFallback:   cfg.summary.geminiModelFallback  ?? GEMINI_DEFAULTS.summary.geminiModelFallback,
         embed:         cfg.embed.geminiModel            || GEMINI_DEFAULTS.embed.geminiModel,
     };
+
+    window._pendingMistralModels = {
+        chat:         cfg.chat.mistralModel             || MISTRAL_DEFAULTS.chat.mistralModel,
+        chatFallback: cfg.chat.mistralModelFallback     ?? MISTRAL_DEFAULTS.chat.mistralModelFallback,
+        memory:       cfg.memory.mistralModel           || MISTRAL_DEFAULTS.memory.mistralModel,
+        memFallback:  cfg.memory.mistralModelFallback   ?? MISTRAL_DEFAULTS.memory.mistralModelFallback,
+        summary:      cfg.summary.mistralModel          || MISTRAL_DEFAULTS.summary.mistralModel,
+        sumFallback:  cfg.summary.mistralModelFallback  ?? null,
+        embed:        cfg.embed.mistralModel            || MISTRAL_DEFAULTS.embed.mistralModel,
+    };
 }
 
 // ─── Gemini model dropdowns ───────────────────────────────────────────────────
 function fillModelDropdowns() {
-    const pending = window._pendingGeminiModels || {};
-    buildModelSelect('g-gemini-chat-model',    GEMINI_CHAT_LIST,    pending.chat,    'g-gemini-chat-model-custom');
-    buildModelSelect('g-gemini-memory-model',  GEMINI_MEMORY_LIST,  pending.memory,  'g-gemini-memory-model-custom');
-    buildModelSelect('g-gemini-summary-model', GEMINI_SUMMARY_LIST, pending.summary, 'g-gemini-summary-model-custom');
-    buildModelSelect('g-gemini-embed-model',   GEMINI_EMBED_LIST,   pending.embed,   'g-gemini-embed-model-custom');
+    // ── Gemini ──
+    const pg = window._pendingGeminiModels || {};
+    buildModelSelect('g-gemini-chat-model',    GEMINI_CHAT_LIST,    pg.chat,    'g-gemini-chat-model-custom');
+    buildModelSelect('g-gemini-memory-model',  GEMINI_MEMORY_LIST,  pg.memory,  'g-gemini-memory-model-custom');
+    buildModelSelect('g-gemini-summary-model', GEMINI_SUMMARY_LIST, pg.summary, 'g-gemini-summary-model-custom');
+    buildModelSelect('g-gemini-embed-model',   GEMINI_EMBED_LIST,   pg.embed,   'g-gemini-embed-model-custom');
+    buildFallbackSelect('g-gemini-chat-model-fallback',    GEMINI_CHAT_LIST,    pg.chatFallback);
+    buildFallbackSelect('g-gemini-memory-model-fallback',  GEMINI_MEMORY_LIST,  pg.memFallback);
+    buildFallbackSelect('g-gemini-summary-model-fallback', GEMINI_SUMMARY_LIST, pg.sumFallback);
 
-    // Fallback dropdowns (include "brak" option)
-    buildFallbackSelect('g-gemini-chat-model-fallback',     GEMINI_CHAT_LIST,    pending.chatFallback);
-    buildFallbackSelect('g-gemini-memory-model-fallback',   GEMINI_MEMORY_LIST,  pending.memFallback);
-    buildFallbackSelect('g-gemini-summary-model-fallback',  GEMINI_SUMMARY_LIST, pending.sumFallback);
+    // ── Mistral ──
+    const pm = window._pendingMistralModels || {};
+    buildModelSelect('g-mistral-chat-model',    MISTRAL_CHAT_LIST,    pm.chat,    'g-mistral-chat-model-custom');
+    buildModelSelect('g-mistral-memory-model',  MISTRAL_MEMORY_LIST,  pm.memory,  'g-mistral-memory-model-custom');
+    buildModelSelect('g-mistral-summary-model', MISTRAL_SUMMARY_LIST, pm.summary, 'g-mistral-summary-model-custom');
+    buildModelSelect('g-mistral-embed-model',   MISTRAL_EMBED_LIST,   pm.embed,   'g-mistral-embed-model-custom');
+    buildFallbackSelect('g-mistral-chat-model-fallback',   MISTRAL_CHAT_LIST,   pm.chatFallback);
+    buildFallbackSelect('g-mistral-memory-model-fallback', MISTRAL_MEMORY_LIST, pm.memFallback);
 }
 
 function buildModelSelect(selectId, list, currentModel, customInputId) {
@@ -301,12 +327,59 @@ window.clearAllRateLimits = function() {
 
 window.syncApiKeysFromGlobal = function() {
     const global = globalSettings.apiKeys || [];
-    if (!global.length) { showToast('Brak globalnych kluczy', 'info'); return; }
+    if (!global.length) { showToast('Brak globalnych kluczy Gemini', 'info'); return; }
     const existing = new Set(apiKeys.map(k => k.key));
     const added    = global.filter(k => !existing.has(k.key));
     apiKeys = [...apiKeys, ...added];
     renderApiKeysList();
-    showToast(`Skopiowano ${added.length} klucz(y)`, 'success');
+    showToast(`Skopiowano ${added.length} klucz(y) Gemini`, 'success');
+};
+
+// ── Mistral API Keys ──────────────────────────────────────────────────────────
+function renderMistralApiKeysList() {
+    const list = document.getElementById('g-mistral-api-keys-list');
+    if (!list) return;
+
+    if (!mistralApiKeys.length) {
+        list.innerHTML = '<p class="no-keys">Brak kluczy — dodaj lub skopiuj z globalnych</p>';
+        return;
+    }
+
+    list.innerHTML = mistralApiKeys.map((k, i) => `
+        <div class="api-key-item">
+            <div class="api-key-main">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="removeMistralApiKey(${i})">Usuń</button>
+            </div>
+        </div>`).join('');
+}
+
+window.addMistralApiKey = function() {
+    const labelEl = document.getElementById('g-new-mistral-key-label');
+    const keyEl   = document.getElementById('g-new-mistral-key-value');
+    const key     = keyEl?.value.trim();
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+    mistralApiKeys = [...mistralApiKeys, { label: labelEl?.value.trim() || `Key ${mistralApiKeys.length + 1}`, key }];
+    if (labelEl) labelEl.value = '';
+    if (keyEl)   keyEl.value   = '';
+    renderMistralApiKeysList();
+};
+
+window.removeMistralApiKey = function(idx) {
+    if (!confirm('Usunąć ten klucz Mistral z czatu?')) return;
+    mistralApiKeys = mistralApiKeys.filter((_, i) => i !== idx);
+    renderMistralApiKeysList();
+};
+
+window.syncMistralApiKeysFromGlobal = function() {
+    const global = globalSettings.mistralApiKeys || [];
+    if (!global.length) { showToast('Brak globalnych kluczy Mistral', 'info'); return; }
+    const existing = new Set(mistralApiKeys.map(k => k.key));
+    const added    = global.filter(k => !existing.has(k.key));
+    mistralApiKeys = [...mistralApiKeys, ...added];
+    renderMistralApiKeysList();
+    showToast(`Skopiowano ${added.length} klucz(y) Mistral`, 'success');
 };
 
 // ─── Collect form → config ────────────────────────────────────────────────────
@@ -323,33 +396,41 @@ function collectConfig() {
             contextTokens:        pi ('g-chat-ctx',            8000),
             geminiModel:          str('g-gemini-chat-model',   GEMINI_DEFAULTS.chat.geminiModel),
             geminiModelFallback:  document.getElementById('g-gemini-chat-model-fallback')?.value || null,
+            mistralModel:         str('g-mistral-chat-model',  MISTRAL_DEFAULTS.chat.mistralModel),
+            mistralModelFallback: document.getElementById('g-mistral-chat-model-fallback')?.value || null,
             ollamaModel:          str('g-ollama-chat-model',   OLLAMA_DEFAULTS.chat.ollamaModel),
         },
         memory: {
             provider:             str('g-memory-provider',    'gemini'),
             temperature:          pf ('g-memory-temp',        0.1),
             maxTokens:            pi ('g-memory-max-tokens',  8192),
-            geminiModel:          str('g-gemini-memory-model', GEMINI_DEFAULTS.memory.geminiModel),
+            geminiModel:          str('g-gemini-memory-model',  GEMINI_DEFAULTS.memory.geminiModel),
             geminiModelFallback:  document.getElementById('g-gemini-memory-model-fallback')?.value || null,
-            ollamaModel:          str('g-ollama-memory-model', OLLAMA_DEFAULTS.memory.ollamaModel),
+            mistralModel:         str('g-mistral-memory-model', MISTRAL_DEFAULTS.memory.mistralModel),
+            mistralModelFallback: document.getElementById('g-mistral-memory-model-fallback')?.value || null,
+            ollamaModel:          str('g-ollama-memory-model',  OLLAMA_DEFAULTS.memory.ollamaModel),
         },
         summary: {
-            provider:            str('g-summary-provider',    'gemini'),
-            temperature:         pf ('g-summary-temp',        0.3),
-            maxTokens:           pi ('g-summary-max-tokens',  8192),
-            everyN:              pi ('g-summary-every',       10),
-            geminiModel:         str('g-gemini-summary-model', GEMINI_DEFAULTS.summary.geminiModel),
-            geminiModelFallback: document.getElementById('g-gemini-summary-model-fallback')?.value || null,
-            ollamaModel:         str('g-ollama-summary-model', OLLAMA_DEFAULTS.summary.ollamaModel),
+            provider:             str('g-summary-provider',    'gemini'),
+            temperature:          pf ('g-summary-temp',        0.3),
+            maxTokens:            pi ('g-summary-max-tokens',  8192),
+            everyN:               pi ('g-summary-every',       10),
+            geminiModel:          str('g-gemini-summary-model',  GEMINI_DEFAULTS.summary.geminiModel),
+            geminiModelFallback:  document.getElementById('g-gemini-summary-model-fallback')?.value || null,
+            mistralModel:         str('g-mistral-summary-model', MISTRAL_DEFAULTS.summary.mistralModel),
+            mistralModelFallback: null,
+            ollamaModel:          str('g-ollama-summary-model',  OLLAMA_DEFAULTS.summary.ollamaModel),
         },
         embed: {
             provider:    str('g-embed-provider',    'gemini'),
-            geminiModel: str('g-gemini-embed-model', GEMINI_DEFAULTS.embed.geminiModel),
-            ollamaModel: str('g-ollama-embed-model', OLLAMA_DEFAULTS.embed.ollamaModel),
+            geminiModel: str('g-gemini-embed-model',  GEMINI_DEFAULTS.embed.geminiModel),
+            mistralModel: str('g-mistral-embed-model', MISTRAL_DEFAULTS.embed.mistralModel),
+            ollamaModel: str('g-ollama-embed-model',  OLLAMA_DEFAULTS.embed.ollamaModel),
         },
-        ollamaBaseUrl: str('g-ollama-url', 'http://localhost:11434'),
-        apiKeys:       [...apiKeys],
-        chatLang:      str('g-chat-lang', 'pl'),
+        ollamaBaseUrl:  str('g-ollama-url', 'http://localhost:11434'),
+        apiKeys:        [...apiKeys],
+        mistralApiKeys: [...mistralApiKeys],
+        chatLang:       str('g-chat-lang', 'pl'),
     };
 }
 

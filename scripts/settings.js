@@ -1,20 +1,22 @@
 import { dbGet, dbPut } from './db.js';
 
-export const PROVIDER_NAMES = ['gemini', 'ollama'];
+export const PROVIDER_NAMES = ['gemini', 'mistral', 'ollama'];
 
 /**
  * Global settings contain only:
  *  - Gemini API keys (shared starting point for new chats)
+ *  - Mistral API keys (shared starting point for new chats)
  *  - Ollama base URL (default for new chats)
  *  - UI preferences (font size, debug)
  *
  * All per-chat model/parameter settings live in chat.config (see chats.js).
  */
 const DEFAULTS = {
-    apiKeys:      [],
-    ollamaBaseUrl: 'http://localhost:11434',
-    chatFontSize:  14,
-    debugPrompts:  false,
+    apiKeys:        [],
+    mistralApiKeys: [],
+    ollamaBaseUrl:  'http://localhost:11434',
+    chatFontSize:   14,
+    debugPrompts:   false,
 };
 
 export async function loadSettings() {
@@ -33,11 +35,22 @@ export async function persistSettings(s) {
 }
 
 /**
- * Return a shuffled copy of API keys from a settings or chat-config object.
- * Accepts both the global settings object and a per-chat config (both have apiKeys[]).
+ * Return a shuffled copy of Gemini API keys from a settings or chat-config object.
  */
 export function getShuffledApiKeys(cfg) {
     const keys = ((cfg?.apiKeys) || []).filter(k => k.key).slice();
+    for (let i = keys.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [keys[i], keys[j]] = [keys[j], keys[i]];
+    }
+    return keys;
+}
+
+/**
+ * Return a shuffled copy of Mistral API keys from a settings or chat-config object.
+ */
+export function getShuffledMistralApiKeys(cfg) {
+    const keys = ((cfg?.mistralApiKeys) || []).filter(k => k.key).slice();
     for (let i = keys.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [keys[i], keys[j]] = [keys[j], keys[i]];

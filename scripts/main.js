@@ -1,5 +1,6 @@
 import { openDB }                                                      from './db.js';
-import { loadSettings, persistSettings, getShuffledApiKeys }           from './settings.js';
+import { loadSettings, persistSettings, getShuffledApiKeys,
+         getShuffledMistralApiKeys }                                    from './settings.js';
 import { getCharacterById, getAllCharacters,
          getCharacterAvatar }                                           from './characters.js';
 import { callChatAPI, buildSystemPrompt, AllModelsRateLimitedError } from './providers/index.js';
@@ -44,15 +45,26 @@ function getProviderConfig(role = 'chat') {
     const cfg      = currentChatConfig || GEMINI_DEFAULTS;
     const taskCfg  = cfg[role] || GEMINI_DEFAULTS[role] || {};
     const provider = taskCfg.provider || 'gemini';
-    const model    = provider === 'ollama'
-        ? (taskCfg.ollamaModel || null)
-        : (taskCfg.geminiModel || null);
-    const modelFallback = provider === 'gemini'
-        ? (taskCfg.geminiModelFallback || null)
-        : null;
+
+    let model, modelFallback, keys;
+    if (provider === 'ollama') {
+        model        = taskCfg.ollamaModel || null;
+        modelFallback = null;
+        keys          = [];
+    } else if (provider === 'mistral') {
+        model         = taskCfg.mistralModel || null;
+        modelFallback = taskCfg.mistralModelFallback || null;
+        keys          = getShuffledMistralApiKeys(cfg);
+    } else {
+        // gemini (default)
+        model         = taskCfg.geminiModel || null;
+        modelFallback = taskCfg.geminiModelFallback || null;
+        keys          = getShuffledApiKeys(cfg);
+    }
+
     return {
         provider,
-        keys:      getShuffledApiKeys(cfg),
+        keys,
         ollamaUrl: cfg.ollamaBaseUrl || 'http://localhost:11434',
         model,
         modelFallback,
@@ -68,7 +80,7 @@ function getTaskCfg(role) {
 
 /** Build initial chat config for a new chat, seeded with global API keys. */
 function buildDefaultChatConfig() {
-    return _buildDefault(settings.apiKeys, settings.ollamaBaseUrl);
+    return _buildDefault(settings.apiKeys, settings.ollamaBaseUrl, settings.mistralApiKeys);
 }
 
 // ============ STATE ============
@@ -311,8 +323,11 @@ async function appSendMessage(retryText) {
     const chatCfg  = getProviderConfig('chat');
     const embedCfg = getProviderConfig('embed');
 
-    if (chatCfg.provider === 'gemini' && !chatCfg.keys.length) {
+    if (chatCfg.provider === 'gemini'  && !chatCfg.keys.length) {
         showToast('Dodaj klucz API Gemini w ustawieniach czatu', 'error'); return;
+    }
+    if (chatCfg.provider === 'mistral' && !chatCfg.keys.length) {
+        showToast('Dodaj klucz API Mistral w ustawieniach czatu', 'error'); return;
     }
 
     // On retry: the user message may already be saved in DB (from a previous failed attempt).
@@ -753,6 +768,7 @@ async function openSettings() {
     if (fsVal) fsVal.textContent = curFs;
 
     renderApiKeysList();
+    renderMistralApiKeysList();
     openModal('settings-modal');
 }
 
@@ -765,16 +781,16 @@ function renderApiKeysList() {
             <div class="api-key-item">
                 <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
                 <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
-                <button class="btn-danger small" onclick="app.removeApiKey(${i})">Remove</button>
+                <button class="btn-danger small" onclick="app.removeApiKey(${i})">Usuń</button>
             </div>`).join('')
-        : '<p class="no-keys">No API keys added yet</p>';
+        : '<p class="no-keys">Brak kluczy</p>';
 }
 
 function addApiKeyRow() {
     const labelEl = document.getElementById('new-key-label');
     const keyEl   = document.getElementById('new-key-value');
     const key     = keyEl?.value.trim();
-    if (!key) { showToast('API key cannot be empty', 'error'); return; }
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
     settings.apiKeys = [...(settings.apiKeys || []),
         { label: labelEl?.value.trim() || `Key ${(settings.apiKeys?.length || 0) + 1}`, key }];
     if (labelEl) labelEl.value = '';
@@ -783,9 +799,42 @@ function addApiKeyRow() {
 }
 
 function removeApiKey(idx) {
-    if (!confirm('Remove this API key?')) return;
+    if (!confirm('Usunąć ten klucz?')) return;
     settings.apiKeys = settings.apiKeys.filter((_, i) => i !== idx);
     renderApiKeysList();
+}
+
+// ── Mistral global keys ──
+function renderMistralApiKeysList() {
+    const list = document.getElementById('mistral-api-keys-list');
+    if (!list) return;
+    const keys = settings.mistralApiKeys || [];
+    list.innerHTML = keys.length
+        ? keys.map((k, i) => `
+            <div class="api-key-item">
+                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
+                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
+                <button class="btn-danger small" onclick="app.removeMistralApiKey(${i})">Usuń</button>
+            </div>`).join('')
+        : '<p class="no-keys">Brak kluczy</p>';
+}
+
+function addMistralApiKeyRow() {
+    const labelEl = document.getElementById('new-mistral-key-label');
+    const keyEl   = document.getElementById('new-mistral-key-value');
+    const key     = keyEl?.value.trim();
+    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
+    settings.mistralApiKeys = [...(settings.mistralApiKeys || []),
+        { label: labelEl?.value.trim() || `Key ${(settings.mistralApiKeys?.length || 0) + 1}`, key }];
+    if (labelEl) labelEl.value = '';
+    if (keyEl)   keyEl.value   = '';
+    renderMistralApiKeysList();
+}
+
+function removeMistralApiKey(idx) {
+    if (!confirm('Usunąć ten klucz?')) return;
+    settings.mistralApiKeys = settings.mistralApiKeys.filter((_, i) => i !== idx);
+    renderMistralApiKeysList();
 }
 
 async function handleSaveSettings() {
@@ -796,6 +845,7 @@ async function handleSaveSettings() {
     if (dp)  settings.debugPrompts  = dp.checked;
     if (obu) settings.ollamaBaseUrl = obu.value.trim() || 'http://localhost:11434';
     if (fs)  settings.chatFontSize  = parseInt(fs.value);
+    // mistralApiKeys are mutated in-place by addMistralApiKeyRow / removeMistralApiKey
 
     window.DEBUG_PROMPTS = !!settings.debugPrompts;
     applyChatFontSize(settings.chatFontSize ?? 14);
@@ -911,6 +961,8 @@ window.app = {
     saveSettings:             handleSaveSettings,
     addApiKeyRow,
     removeApiKey,
+    addMistralApiKeyRow,
+    removeMistralApiKey,
 
     openChatSettings:         navigateToChatSettings,
     openCharacterEditor:      charId => navigateToCharEditor(charId),
