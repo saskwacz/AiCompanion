@@ -95,10 +95,23 @@ function getTaskCfg(role) {
     return cfg[role] || GEMINI_DEFAULTS[role] || {};
 }
 
-/** Build initial chat config for a new chat, seeded with global API keys. */
+/** Build initial chat config for a new chat, seeded with global settings. */
 function buildDefaultChatConfig() {
-    return _buildDefault(settings.apiKeys, settings.ollamaBaseUrl, settings.mistralApiKeys, settings.groqApiKeys, settings.openrouterApiKeys, settings.openaiApiKeys, settings.claudeApiKeys);
-
+    return _buildDefault(
+        settings.apiKeys,
+        settings.ollamaBaseUrl,
+        settings.mistralApiKeys,
+        settings.groqApiKeys,
+        settings.openrouterApiKeys,
+        settings.openaiApiKeys,
+        settings.claudeApiKeys,
+        {
+            chat:    settings.defaultChatProvider,
+            memory:  settings.defaultMemoryProvider,
+            summary: settings.defaultSummaryProvider,
+            embed:   settings.defaultEmbedProvider,
+        },
+    );
 }
 
 // ============ STATE ============
@@ -736,6 +749,11 @@ async function openSettings() {
     if (fs)    fs.value          = curFs;
     if (fsVal) fsVal.textContent = curFs;
 
+    setVal('default-chat-provider',    settings.defaultChatProvider    || 'gemini');
+    setVal('default-memory-provider',  settings.defaultMemoryProvider  || 'gemini');
+    setVal('default-summary-provider', settings.defaultSummaryProvider || 'gemini');
+    setVal('default-embed-provider',   settings.defaultEmbedProvider   || 'gemini');
+
     renderApiKeysList();
     renderMistralApiKeysList();
     renderGroqApiKeysList();
@@ -942,6 +960,18 @@ function removeClaudeApiKey(idx) {
     renderClaudeApiKeysList();
 }
 
+function setVal(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+}
+
+function setAllDefaultProviders(provider) {
+    setVal('default-chat-provider',    provider);
+    setVal('default-memory-provider',  provider);
+    setVal('default-summary-provider', provider);
+    setVal('default-embed-provider',   provider);
+}
+
 async function handleSaveSettings() {
     const dp  = document.getElementById('debug-prompts');
     const obu = document.getElementById('ollama-base-url');
@@ -950,6 +980,11 @@ async function handleSaveSettings() {
     if (dp)  settings.debugPrompts  = dp.checked;
     if (obu) settings.ollamaBaseUrl = obu.value.trim() || 'http://localhost:11434';
     if (fs)  settings.chatFontSize  = parseInt(fs.value);
+
+    settings.defaultChatProvider    = document.getElementById('default-chat-provider')?.value    || 'gemini';
+    settings.defaultMemoryProvider  = document.getElementById('default-memory-provider')?.value  || 'gemini';
+    settings.defaultSummaryProvider = document.getElementById('default-summary-provider')?.value || 'gemini';
+    settings.defaultEmbedProvider   = document.getElementById('default-embed-provider')?.value   || 'gemini';
     // mistralApiKeys are mutated in-place by addMistralApiKeyRow / removeMistralApiKey
 
     window.DEBUG_PROMPTS = !!settings.debugPrompts;
@@ -1076,6 +1111,7 @@ window.app = {
     removeOpenaiApiKey,
     addClaudeApiKeyRow,
     removeClaudeApiKey,
+    setAllDefaultProviders,
 
     openChatSettings:         navigateToChatSettings,
     openCharacterEditor:      charId => navigateToCharEditor(charId),

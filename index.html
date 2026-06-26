@@ -207,6 +207,73 @@
                 <input type="text" id="ollama-base-url" class="setting-input" placeholder="http://localhost:11434">
             </div>
 
+            <div class="settings-section-header">&#128260; Domyślni dostawcy (nowe czaty)</div>
+            <div class="setting-group">
+                <label>Ustaw wszystkich na:</label>
+                <div class="quick-buttons" style="margin-bottom:12px">
+                    <button class="quick-btn" onclick="app.setAllDefaultProviders('gemini')">Gemini</button>
+                    <button class="quick-btn" onclick="app.setAllDefaultProviders('mistral')">Mistral</button>
+                    <button class="quick-btn" onclick="app.setAllDefaultProviders('groq')">Groq</button>
+                    <button class="quick-btn" onclick="app.setAllDefaultProviders('openrouter')">OpenRouter</button>
+                    <button class="quick-btn" onclick="app.setAllDefaultProviders('openai')">OpenAI</button>
+                    <button class="quick-btn" onclick="app.setAllDefaultProviders('claude')">Claude</button>
+                    <button class="quick-btn" onclick="app.setAllDefaultProviders('ollama')">Ollama</button>
+                </div>
+                <div class="cs-two-col">
+                    <div>
+                        <label for="default-chat-provider">Chat</label>
+                        <select id="default-chat-provider" class="setting-input">
+                            <option value="gemini">Gemini</option>
+                            <option value="mistral">Mistral</option>
+                            <option value="groq">Groq</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude</option>
+                            <option value="ollama">Ollama (local)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="default-memory-provider">Memory</label>
+                        <select id="default-memory-provider" class="setting-input">
+                            <option value="gemini">Gemini</option>
+                            <option value="mistral">Mistral</option>
+                            <option value="groq">Groq</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude</option>
+                            <option value="ollama">Ollama (local)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="cs-two-col" style="margin-top:12px">
+                    <div>
+                        <label for="default-summary-provider">Summary</label>
+                        <select id="default-summary-provider" class="setting-input">
+                            <option value="gemini">Gemini</option>
+                            <option value="mistral">Mistral</option>
+                            <option value="groq">Groq</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude</option>
+                            <option value="ollama">Ollama (local)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="default-embed-provider">Embeddings</label>
+                        <select id="default-embed-provider" class="setting-input">
+                            <option value="gemini">Gemini</option>
+                            <option value="mistral">Mistral</option>
+                            <option value="groq">Groq ⚠️ brak embeddings</option>
+                            <option value="openrouter">OpenRouter ⚠️ brak embeddings</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude ⚠️ brak embeddings</option>
+                            <option value="ollama">Ollama (local)</option>
+                        </select>
+                    </div>
+                </div>
+                <small>Nowe czaty startują z wybranymi dostawcami i globalnymi kluczami API.</small>
+            </div>
+
             <div class="settings-section-header">&#9881;&#65039; Interfejs</div>
             <div class="setting-group">
                 <label for="chat-font-size">Rozmiar czcionki czatu: <span id="chat-font-size-value">14</span> px</label>

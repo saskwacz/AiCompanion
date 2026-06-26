@@ -5,6 +5,7 @@
  * Imported by main.js, character-editor.js, chat-settings-page.js.
  */
 
+import { PROVIDER_NAMES }       from './settings.js';
 import { GEMINI_DEFAULTS }      from './providers/gemini-models.js';
 import { MISTRAL_DEFAULTS }     from './providers/mistral-models.js';
 import { GROQ_DEFAULTS }        from './providers/groq-models.js';
@@ -137,15 +138,44 @@ export function resolveChatConfig(chat) {
     };
 }
 
+function resolveDefaultProvider(value) {
+    return PROVIDER_NAMES.includes(value) ? value : 'gemini';
+}
+
 /**
- * Build a fresh chat config seeded with global API keys / Ollama URL.
+ * Build a fresh chat config seeded with global API keys, Ollama URL, and default providers.
  */
-export function buildDefaultChatConfig(globalApiKeys = [], ollamaBaseUrl = 'http://localhost:11434', globalMistralApiKeys = [], globalGroqApiKeys = [], globalOpenRouterApiKeys = [], globalOpenaiApiKeys = [], globalClaudeApiKeys = []) {
+export function buildDefaultChatConfig(
+    globalApiKeys = [],
+    ollamaBaseUrl = 'http://localhost:11434',
+    globalMistralApiKeys = [],
+    globalGroqApiKeys = [],
+    globalOpenRouterApiKeys = [],
+    globalOpenaiApiKeys = [],
+    globalClaudeApiKeys = [],
+    defaultProviders = {},
+) {
     return {
-        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,    ...OPENROUTER_DEFAULTS.chat,    ...OPENAI_DEFAULTS.chat,    ...CLAUDE_DEFAULTS.chat },
-        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,  ...OPENROUTER_DEFAULTS.memory,  ...OPENAI_DEFAULTS.memory,  ...CLAUDE_DEFAULTS.memory },
-        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary, ...OPENROUTER_DEFAULTS.summary, ...OPENAI_DEFAULTS.summary, ...CLAUDE_DEFAULTS.summary },
-        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,   ...OPENROUTER_DEFAULTS.embed,   ...OPENAI_DEFAULTS.embed,   ...CLAUDE_DEFAULTS.embed },
+        chat:    {
+            ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,
+            ...OPENROUTER_DEFAULTS.chat, ...OPENAI_DEFAULTS.chat,    ...CLAUDE_DEFAULTS.chat,
+            provider: resolveDefaultProvider(defaultProviders.chat),
+        },
+        memory:  {
+            ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,
+            ...OPENROUTER_DEFAULTS.memory, ...OPENAI_DEFAULTS.memory,  ...CLAUDE_DEFAULTS.memory,
+            provider: resolveDefaultProvider(defaultProviders.memory),
+        },
+        summary: {
+            ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary,
+            ...OPENROUTER_DEFAULTS.summary, ...OPENAI_DEFAULTS.summary, ...CLAUDE_DEFAULTS.summary,
+            provider: resolveDefaultProvider(defaultProviders.summary),
+        },
+        embed:   {
+            ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,
+            ...OPENROUTER_DEFAULTS.embed, ...OPENAI_DEFAULTS.embed,   ...CLAUDE_DEFAULTS.embed,
+            provider: resolveDefaultProvider(defaultProviders.embed),
+        },
         apiKeys:           [...(globalApiKeys           || [])],
         mistralApiKeys:    [...(globalMistralApiKeys    || [])],
         groqApiKeys:       [...(globalGroqApiKeys       || [])],

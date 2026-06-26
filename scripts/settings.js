@@ -4,9 +4,9 @@ export const PROVIDER_NAMES = ['gemini', 'mistral', 'groq', 'openrouter', 'opena
 
 /**
  * Global settings contain only:
- *  - Gemini API keys (shared starting point for new chats)
- *  - Mistral API keys (shared starting point for new chats)
+ *  - API keys per provider (shared starting point for new chats)
  *  - Ollama base URL (default for new chats)
+ *  - Default providers for chat / memory / summary / embed (new chats)
  *  - UI preferences (font size, debug)
  *
  * All per-chat model/parameter settings live in chat.config (see chats.js).
@@ -19,6 +19,10 @@ const DEFAULTS = {
     openaiApiKeys:      [],
     claudeApiKeys:      [],
     ollamaBaseUrl:  'http://localhost:11434',
+    defaultChatProvider:    'gemini',
+    defaultMemoryProvider:  'gemini',
+    defaultSummaryProvider: 'gemini',
+    defaultEmbedProvider:   'gemini',
     chatFontSize:   14,
     debugPrompts:   false,
 };
