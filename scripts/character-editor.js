@@ -3,7 +3,7 @@
  */
 
 import { openDB }                                                        from './db.js';
-import { loadSettings, getShuffledApiKeys }                             from './settings.js';
+import { loadSettings, persistSettings, getShuffledApiKeys }             from './settings.js';
 import { createCharacter, updateCharacter, deleteCharacterById,
          getCharacterById, getAllCharacters,
          saveCharacterAvatar, getCharacterAvatar, deleteCharacterAvatar } from './characters.js';
@@ -120,8 +120,12 @@ window.saveCharacter = async function() {
         // Seed memory in the background for each chat
         seedMemoryForAllChats(char).catch(e => console.warn('[CharEditor] Memory seed error:', e));
 
-        // Navigate back
-        sessionStorage.setItem('returnCharId', String(char.id));
+        // Navigate back — restore this character on index.html
+        const globalSettings = await loadSettings();
+        await persistSettings({
+            lastCharacterId: char.id,
+            lastChatId:      globalSettings.lastChatId,
+        });
         setTimeout(() => { window.location.href = 'index.html'; }, 600);
 
     } catch (err) {
@@ -153,11 +157,7 @@ window.deleteCharacter = async function() {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 window.goBack = function() {
-    if (history.length > 1) {
-        history.back();
-    } else {
-        window.location.href = 'index.html';
-    }
+    window.location.href = 'index.html';
 };
 
 // ─── Memory seeding ───────────────────────────────────────────────────────────

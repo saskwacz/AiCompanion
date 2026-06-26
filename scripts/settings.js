@@ -23,6 +23,8 @@ const DEFAULTS = {
     defaultMemoryProvider:  'gemini',
     defaultSummaryProvider: 'gemini',
     defaultEmbedProvider:   'gemini',
+    lastCharacterId:  null,
+    lastChatId:       null,
     chatFontSize:   14,
     debugPrompts:   false,
 };

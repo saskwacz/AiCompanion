@@ -454,8 +454,7 @@ function loadingHtml(label) {
 }
 
 window.goBack = function() {
-    if (document.referrer) history.back();
-    else window.location.href = 'index.html';
+    window.location.href = 'index.html';
 };
 
 init();

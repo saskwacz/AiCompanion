@@ -160,6 +160,17 @@ function updateScrollButtonVisibility() {
 function scrollToMessagesTop()    { const c = document.getElementById('messages-container'); if (c) c.scrollTop = 0; }
 function scrollToMessagesBottom() { const c = document.getElementById('messages-container'); if (c) c.scrollTop = Math.max(c.scrollHeight - c.clientHeight, 0); }
 
+/** Persist last selected character / chat for restore on return or reload. */
+async function persistLastSelection(charId = currentCharacter?.id, chatId = currentChat?.id) {
+    if (!charId) return;
+    settings.lastCharacterId = charId;
+    settings.lastChatId      = chatId ?? null;
+    await persistSettings({
+        lastCharacterId: settings.lastCharacterId,
+        lastChatId:      settings.lastChatId,
+    });
+}
+
 // ============ INIT ============
 async function init() {
     try {
@@ -168,24 +179,17 @@ async function init() {
         window.DEBUG_PROMPTS = !!settings.debugPrompts;
         applyChatFontSize(settings.chatFontSize ?? 14);
 
-        // Restore state after returning from a sub-page
-        const savedCharId = sessionStorage.getItem('returnCharId');
-        const savedChatId = sessionStorage.getItem('returnChatId');
-        sessionStorage.removeItem('returnCharId');
-        sessionStorage.removeItem('returnChatId');
-
         const chars = await getAllCharacters();
         if (chars.length === 0) {
             showWelcomeScreen();
         } else {
-            const targetChar = savedCharId ? chars.find(c => String(c.id) === savedCharId) : null;
-            await selectCharacter((targetChar || chars[0]).id);
-
-            if (savedChatId) {
-                const chatIdNum = parseInt(savedChatId);
-                const savedChat = await getChatById(chatIdNum);
-                if (savedChat) await selectChat(chatIdNum);
-            }
+            const savedCharId = settings.lastCharacterId;
+            const savedChatId = settings.lastChatId;
+            const targetChar  = savedCharId
+                ? chars.find(c => String(c.id) === String(savedCharId))
+                : null;
+            const preferredChatId = savedChatId ? parseInt(savedChatId, 10) : null;
+            await selectCharacter((targetChar || chars[0]).id, preferredChatId);
         }
 
         setupEventListeners();
@@ -216,20 +220,19 @@ function setupEventListeners() {
 
 // ============ NAVIGATION TO SUB-PAGES ============
 function navigateToCharEditor(charId) {
-    sessionStorage.setItem('returnCharId', String(currentCharacter?.id || ''));
-    sessionStorage.setItem('returnChatId', String(currentChat?.id || ''));
+    persistLastSelection();
     window.location.href = charId ? `character.html?id=${charId}` : 'character.html';
 }
 
 function navigateToChatSettings() {
     if (!currentChat) { showToast('Najpierw otwórz czat', 'error'); return; }
-    sessionStorage.setItem('returnCharId', String(currentCharacter?.id || ''));
-    sessionStorage.setItem('returnChatId', String(currentChat.id));
+    persistLastSelection();
     window.location.href = `chat-settings.html?chatId=${currentChat.id}`;
 }
 
 function openMemories() {
     if (!currentChat) { showToast('Najpierw otwórz czat', 'error'); return; }
+    persistLastSelection();
     window.location.href = `memories.html?chatId=${currentChat.id}`;
 }
 
@@ -245,7 +248,7 @@ async function loadCharacterAvatar(charId) {
     }
 }
 
-async function selectCharacter(charId) {
+async function selectCharacter(charId, preferredChatId = null) {
     currentCharacter = await getCharacterById(charId);
     if (!currentCharacter) return;
 
@@ -266,8 +269,13 @@ async function selectCharacter(charId) {
     const chats = await getChatsForCharacter(charId);
     renderChatList(chats);
 
-    if (chats.length > 0) await selectChat(chats[0].id);
-    else                  await createNewChat();
+    const preferred = preferredChatId
+        ? chats.find(c => c.id === preferredChatId)
+        : null;
+
+    if (preferred)              await selectChat(preferred.id);
+    else if (chats.length > 0)  await selectChat(chats[0].id);
+    else                        await createNewChat();
 }
 
 // ============ CHAT MANAGEMENT ============
@@ -331,6 +339,8 @@ async function selectChat(chatId) {
     /* Close mobile sidebar after selecting a chat */
     document.querySelector('.sidebar')?.classList.remove('sidebar-open');
     document.getElementById('sidebar-backdrop')?.classList.remove('active');
+
+    await persistLastSelection();
 }
 
 async function deleteChatConfirm(chatId) {
@@ -1037,6 +1047,7 @@ function editCharacterFromList(charId) {
 // ============ SUMMARY ============
 function generateSummary() {
     if (!currentChat) { showToast('No chat selected', 'error'); return; }
+    persistLastSelection();
     window.location.href = `summary.html?chatId=${currentChat.id}`;
 }
 

@@ -771,11 +771,7 @@ window.saveSettings = async function() {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 window.goBack = function() {
-    if (history.length > 1) {
-        history.back();
-    } else {
-        window.location.href = 'index.html';
-    }
+    window.location.href = 'index.html';
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
