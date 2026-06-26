@@ -293,8 +293,13 @@ async function createNewChat() {
     renderChatList(await getChatsForCharacter(currentCharacter.id));
 
     const memCfgSeed = getProviderConfig('memory');
+    const embedCfgSeed = getProviderConfig('embed');
     setTimeout(async () => {
-        const seeded = await seedMemoryFromCharacter(chat.id, currentCharacter, memCfgSeed, null, getTaskCfg('memory').maxTokens ?? 8192);
+        const seeded = await seedMemoryFromCharacter(
+            chat.id, currentCharacter, memCfgSeed, null,
+            getTaskCfg('memory').maxTokens ?? 8192,
+            embedCfgSeed,
+        );
         if (seeded && currentChat?.id === chat.id) {
             currentMemory = seeded;
         }

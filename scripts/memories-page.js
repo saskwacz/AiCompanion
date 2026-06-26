@@ -22,6 +22,7 @@ let charData  = null;
 let msgs      = [];
 let memory    = null;
 let memCfg    = null;
+let embedCfg  = null;
 let maxTok    = 8192;
 let refreshing = false;
 
@@ -39,6 +40,7 @@ async function init() {
 
         const cfg = resolveChatConfig(chatData);
         memCfg    = buildProviderCfg(cfg, 'memory');
+        embedCfg  = buildProviderCfg(cfg, 'embed');
         maxTok    = cfg.memory?.maxTokens ?? 8192;
 
         document.getElementById('page-title').textContent =
@@ -176,7 +178,7 @@ window.refreshMemory = async function() {
     try {
         memory = await updateMemoryFromExchange(
             chatId, lastUser.content, lastAi.content, memCfg,
-            charData, msgs, maxTok
+            charData, msgs, maxTok, null, embedCfg,
         );
         render();
         showToast('Pamięć zaktualizowana', 'success');

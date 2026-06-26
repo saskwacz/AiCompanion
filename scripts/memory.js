@@ -562,8 +562,8 @@ export async function computeMemoryUpdate(chatId, userMsg, aiMsg, cfg, character
         updated[key] = capItems(updated[key]);
     }
 
-    const activeCfg = embedCfg || cfg;
-    return activeCfg ? await ensureEmbeddings(updated, activeCfg) : updated;
+    if (!embedCfg) return updated;
+    return await ensureEmbeddings(updated, embedCfg);
 }
 
 /** Save a pre-computed memory object to DB. */
@@ -604,7 +604,7 @@ export async function seedMemoryFromCharacter(chatId, character, cfg, existingMe
             charGoals:    mi('charGoals',    existing.charGoals),
             charMemories: mi('charMemories', existing.charMemories),
         };
-        return await persistWithEmbeddings(seeded, embedCfg || cfg);
+        return await persistWithEmbeddings(seeded, embedCfg);
     } catch (e) {
         console.warn('[Memory] Seed failed:', e.message);
     }
