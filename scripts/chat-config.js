@@ -40,13 +40,24 @@ export function migrateConfig(cfg) {
             if ('model' in task && !('geminiModel' in task)) {
                 const provider = task.provider || 'gemini';
                 const def      = GEMINI_DEFAULTS[role] || {};
+                const modelVal = task.model;
                 if (provider === 'ollama') {
-                    task.ollamaModel = task.model || def.ollamaModel;
-                    task.geminiModel = task.geminiModel || def.geminiModel;
+                    task.ollamaModel = modelVal || def.ollamaModel;
+                } else if (provider === 'mistral') {
+                    task.mistralModel = modelVal || MISTRAL_DEFAULTS[role]?.mistralModel;
+                } else if (provider === 'groq') {
+                    task.groqModel = modelVal || GROQ_DEFAULTS[role]?.groqModel;
+                } else if (provider === 'openrouter') {
+                    task.openrouterModel = modelVal || OPENROUTER_DEFAULTS[role]?.openrouterModel;
+                } else if (provider === 'openai') {
+                    task.openaiModel = modelVal || OPENAI_DEFAULTS[role]?.openaiModel;
+                } else if (provider === 'claude') {
+                    task.claudeModel = modelVal || CLAUDE_DEFAULTS[role]?.claudeModel;
                 } else {
-                    task.geminiModel = task.model || def.geminiModel;
-                    task.ollamaModel = task.ollamaModel || def.ollamaModel;
+                    task.geminiModel = modelVal || def.geminiModel;
                 }
+                task.geminiModel   = task.geminiModel   ?? def.geminiModel;
+                task.ollamaModel   = task.ollamaModel   ?? def.ollamaModel;
                 delete task.model;
             }
             result[role] = task;
@@ -84,9 +95,23 @@ export function migrateConfig(cfg) {
             geminiModel: cfg.embedModel    || GEMINI_DEFAULTS.embed.geminiModel,
             ollamaModel: GEMINI_DEFAULTS.embed.ollamaModel,
         },
-        apiKeys:      cfg.apiKeys      || [],
-        ollamaBaseUrl: cfg.ollamaBaseUrl || 'http://localhost:11434',
+        apiKeys:           cfg.apiKeys           || [],
+        mistralApiKeys:    cfg.mistralApiKeys    || [],
+        groqApiKeys:       cfg.groqApiKeys       || [],
+        openrouterApiKeys: cfg.openrouterApiKeys || [],
+        openaiApiKeys:     cfg.openaiApiKeys     || [],
+        claudeApiKeys:     cfg.claudeApiKeys     || [],
+        ollamaBaseUrl:     cfg.ollamaBaseUrl     || 'http://localhost:11434',
+        chatLang:          cfg.chatLang          || 'pl',
     };
+}
+
+/**
+ * Normalize a raw chat config for export/import round-trip.
+ * Migrates legacy formats and merges all provider defaults.
+ */
+export function normalizeChatConfig(cfg) {
+    return resolveChatConfig({ config: cfg ?? null });
 }
 
 /**

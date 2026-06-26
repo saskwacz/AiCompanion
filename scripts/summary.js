@@ -78,6 +78,45 @@ export async function deleteSummaryForChat(chatId) {
     await dbDelete('summaries', chatId);
 }
 
+/** Prepare summary state for JSON export. */
+export function summaryForExport(state) {
+    if (!state) return null;
+    const s = migrateState(state);
+    return {
+        rolling:          s.rolling          ?? null,
+        chunks:           s.chunks           ?? [],
+        medium:           s.medium           ?? [],
+        global:           s.global           ?? null,
+        prohibitedMsgIds: s.prohibitedMsgIds ?? [],
+    };
+}
+
+/** Restore summary state from an imported JSON object. */
+export function summaryFromImport(data, chatId) {
+    if (!data) return null;
+    if ('chunks' in data) {
+        return {
+            chatId,
+            rolling:          data.rolling          ?? null,
+            chunks:           data.chunks           ?? [],
+            medium:           data.medium           ?? [],
+            global:           data.global           ?? null,
+            prohibitedMsgIds: data.prohibitedMsgIds ?? [],
+        };
+    }
+    if (data.text) {
+        return {
+            chatId,
+            rolling:          { text: data.text, updatedAt: data.createdAt ?? Date.now() },
+            chunks:           [],
+            medium:           [],
+            global:           null,
+            prohibitedMsgIds: [],
+        };
+    }
+    return null;
+}
+
 // ─── Prohibited-content helper ────────────────────────────────────────────────
 export function isProhibitedContent(err) {
     return /PROHIBITED|blocked by Gemini|SAFETY|RECITATION/i.test(err?.message ?? '');

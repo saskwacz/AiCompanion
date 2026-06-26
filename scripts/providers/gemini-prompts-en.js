@@ -6,6 +6,11 @@
  * Chat system prompt instructs the AI to respond in English.
  */
 
+import {
+    buildMemoryUpdatePrompt as sharedMemoryUpdate,
+    buildMemorySeedPrompt   as sharedMemorySeed,
+} from './memory-prompt-shared.js';
+
 // ─── CHAT — system prompt ─────────────────────────────────────────────────────
 
 /**
@@ -35,91 +40,11 @@ export function buildSystemPrompt(character, memCtx = '') {
 // ─── MEMORY ───────────────────────────────────────────────────────────────────
 
 export function buildMemoryUpdatePrompt(existing, character, recentMessages, userMsg, aiMsg) {
-    const fmtPlain = arr => (arr || []).map(i => i.text || i).filter(Boolean);
-    const existingStr = JSON.stringify({
-        user: {
-            profile:  fmtPlain(existing.profile),
-            goals:    fmtPlain(existing.goals),
-            memories: fmtPlain(existing.memories),
-        },
-        character: {
-            charProfile:  fmtPlain(existing.charProfile),
-            charGoals:    fmtPlain(existing.charGoals),
-            charMemories: fmtPlain(existing.charMemories),
-        },
-    }, null, 2);
-
-    const companionName   = character?.name || 'Companion';
-    const allMessages     = recentMessages || [];
-    const isFirstExchange = allMessages.filter(m => m.role === 'user').length <= 1;
-
-    const contextMsgs = isFirstExchange ? [] : allMessages.slice(-8, -2);
-    const recentStr   = contextMsgs
-        .map(m => `${m.role === 'user' ? 'User' : companionName}: ${m.content}`)
-        .join('\n');
-
-    const welcomeMsg  = character?.welcomeMessage;
-    const exchangeStr = (isFirstExchange && welcomeMsg)
-        ? `${companionName}: ${welcomeMsg}\nUser: ${userMsg}\n${companionName}: ${aiMsg}`
-        : `User: ${userMsg}\n${companionName}: ${aiMsg}`;
-
-    const charCtx = character ? [
-        `CHARACTER NAME: ${character.name}`,
-        character.scenario           ? `SCENARIO: ${character.scenario}`                              : '',
-        character.promptInstructions ? `CHARACTER INSTRUCTIONS:\n${character.promptInstructions}`    : '',
-    ].filter(Boolean).join('\n') : '';
-
-    return `You are a memory extraction assistant for an AI companion named ${companionName}.
-Respond in English — ALL values in arrays must be written in English.
-
-${charCtx ? `CHARACTER CONTEXT:\n${charCtx}\n` : ''}CURRENT MEMORY (preserve ALL existing entries, add new ones):
-${existingStr}
-${recentStr ? `\nRECENT CONVERSATION (context):\n${recentStr}\n` : ''}EXCHANGE TO ANALYSE${isFirstExchange ? ' (first meeting — analyse everything)' : ''}:
-${exchangeStr}
-
-Task:
-1. Take ALL existing memory entries from above.
-2. Add NEW facts, preferences, or goals from this exchange.
-3. Remove an entry ONLY if it is directly contradicted in this exchange.
-4. Return COMPLETE, updated lists — not just new items.
-
---- SECTION 1: user (what ${companionName} knows about THE USER) ---
-- "profile"  = FULL list: facts, preferences, personality traits and relationships
-- "goals"    = FULL list of goals, plans, wishes
-- "memories" = FULL list of important moments and events
-
---- SECTION 2: character (what ${companionName} knows about THEMSELVES) ---
-- "charProfile"  = FULL list: self-facts, preferences and personality traits
-- "charGoals"    = FULL list of own goals and motivations
-- "charMemories" = FULL list of own significant memories
-
-Rules:
-- Maximum 20 items per list — if exceeded, remove the least important.
-- Each item is one short, clear English sentence.
-- CHRONOLOGY: Each entry may have a "firstSeen" property (ms since 1970-01-01 epoch).
-  New entry → stamp with current time. Updated entry → PRESERVE original "firstSeen".
-- Return ONLY a single valid JSON object with exactly these 6 keys:
-  profile, goals, memories, charProfile, charGoals, charMemories
-- Each value is an array of strings (or objects with "text" and "firstSeen").`;
+    return sharedMemoryUpdate('en', existing, character, recentMessages, userMsg, aiMsg);
 }
 
 export function buildMemorySeedPrompt(character) {
-    return `You are a knowledge extraction assistant for an AI character.
-Analyse the character definition below and fill exactly 3 JSON keys.
-ALL values must be written in ENGLISH.
-
-CHARACTER NAME: ${character.name}
-SCENARIO: ${character.scenario || 'none'}
-CHARACTER DETAILS: ${character.characterDetails || 'none'}
-
-Extract ONLY from the definition above:
-- "charProfile"  : facts, preferences, personality traits, appearance, backstory — max 15 short sentences
-- "charGoals"    : motivations, goals, desires — max 10 short sentences
-- "charMemories" : past events, formative experiences — max 10 short sentences
-
-Rules:
-- Each item is one short English sentence (no bullet symbols).
-- Return ONLY a valid JSON object with exactly these 3 keys. No other text.`;
+    return sharedMemorySeed('en', character);
 }
 
 // ─── SUMMARY ─────────────────────────────────────────────────────────────────

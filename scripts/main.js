@@ -11,7 +11,6 @@ import { createChat, updateChat, deleteChatById,
 import { addMessage, getMessagesForChat, deleteMessageById,
          deleteMessagesFrom, deleteAllForChat }                         from './messages.js';
 import { getMemoryForChat, computeMemoryUpdate, persistMemory,
-         updateMemoryFromExchange,
          seedMemoryFromCharacter, memoryToContext,
          pruneMemoryByMsgIds }                                          from './memory.js';
 import { getSummaryState, saveSummaryState, deleteSummaryForChat,
@@ -114,7 +113,6 @@ let currentChatError     = null;   // { text, isRateLimit } — error bubble sho
 let isLoading            = false;
 let lastFailedMessage    = null;
 let currentSummary       = '';
-let memoryPanelOpen      = false;
 let aiResponseCount      = 0;
 let pendingRequests      = 0;
 let currentCharacterAvatarUrl = null;
@@ -217,6 +215,11 @@ function navigateToChatSettings() {
     window.location.href = `chat-settings.html?chatId=${currentChat.id}`;
 }
 
+function openMemories() {
+    if (!currentChat) { showToast('Najpierw otwórz czat', 'error'); return; }
+    window.location.href = `memories.html?chatId=${currentChat.id}`;
+}
+
 // ============ CHARACTER MANAGEMENT ============
 async function loadCharacterAvatar(charId) {
     if (currentCharacterAvatarUrl) {
@@ -281,7 +284,6 @@ async function createNewChat() {
         const seeded = await seedMemoryFromCharacter(chat.id, currentCharacter, memCfgSeed, null, getTaskCfg('memory').maxTokens ?? 8192);
         if (seeded && currentChat?.id === chat.id) {
             currentMemory = seeded;
-            renderMemoryPanel();
         }
     }, 300);
 }
@@ -301,7 +303,6 @@ async function selectChat(chatId) {
 
     renderMessages();
     updateScrollButtonVisibility();
-    if (memoryPanelOpen) renderMemoryPanel();
 
     document.querySelectorAll('.chat-item-wrapper').forEach(el => {
         el.classList.toggle('active', el.dataset.chatId === String(chatId));
@@ -481,7 +482,6 @@ async function appSendMessage(retryText) {
 
         // ── Step 5: render ──
         renderMessages();
-        renderMemoryPanel();
         renderChatList(await getChatsForCharacter(currentCharacter.id));
 
     } catch (err) {
@@ -674,67 +674,6 @@ function renderChatList(chats) {
         </div>`).join('');
 }
 
-// ============ MEMORY PANEL ============
-function toggleMemoryPanel() {
-    memoryPanelOpen = !memoryPanelOpen;
-    document.getElementById('memory-panel')?.classList.toggle('open', memoryPanelOpen);
-    if (memoryPanelOpen) renderMemoryPanel();
-}
-
-function renderMemoryPanel() {
-    const body = document.getElementById('memory-panel-body');
-    if (!body) return;
-
-    if (!currentMemory || !currentChat) {
-        body.innerHTML = '<p class="memory-empty">Open a chat to view memory</p>';
-        return;
-    }
-
-    const renderSection = (key, label) => {
-        const items  = currentMemory[key] || [];
-        const sorted = [...items].sort((a, b) => (a.firstSeen || 0) - (b.firstSeen || 0));
-        return `
-            <div class="memory-section">
-                <div class="memory-section-title">${label}</div>
-                ${sorted.length
-                    ? `<ul class="memory-list">${sorted.map(i => {
-                        const text      = escapeHtml(i.text || i);
-                        const count     = i.count || 1;
-                        const badge     = count > 1 ? `<span class="mem-count" title="wspomniano ${count} razy">x${count}</span>` : '';
-                        const dateStr   = i.firstSeen ? new Date(i.firstSeen).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
-                        const dateBadge = dateStr ? `<span class="mem-date" title="Pierwsze pojawienie: ${dateStr}">${dateStr}</span>` : '';
-                        const msgBadge  = i.createdAtMsgId != null ? `<span class="mem-msgid" title="Powstało przy wiadomości #${i.createdAtMsgId}">msg#${i.createdAtMsgId}</span>` : '';
-                        return `<li>${text}${badge}${dateBadge}${msgBadge}</li>`;
-                      }).join('')}</ul>`
-                    : `<p class="memory-empty-section">Nothing recorded yet</p>`}
-            </div>`;
-    };
-
-    body.innerHTML =
-        `<div class="memory-group-title">About ${escapeHtml(currentCharacter?.name || 'Character')}</div>` +
-        [['charProfile','🧬 Self-profile'],['charGoals','🎯 Own goals'],['charMemories','📖 Own memories']].map(([k,l]) => renderSection(k,l)).join('') +
-        `<div class="memory-group-title">About the User</div>` +
-        [['profile','📋 User profile'],['goals','🏆 User goals'],['memories','💭 Shared memories']].map(([k,l]) => renderSection(k,l)).join('');
-}
-
-async function refreshMemory() {
-    if (!currentChat || currentMessages.length < 2) {
-        showToast('Need more conversation to refresh memory', 'info'); return;
-    }
-    const memCfg  = getProviderConfig('memory');
-    showToast('Updating memory…', 'info');
-    const lastUser = [...currentMessages].reverse().find(m => m.role === 'user');
-    const lastAi   = [...currentMessages].reverse().find(m => m.role === 'assistant');
-    if (lastUser && lastAi) {
-        currentMemory = await updateMemoryFromExchange(
-            currentChat.id, lastUser.content, lastAi.content, memCfg,
-            currentCharacter, currentMessages, getTaskCfg('memory').maxTokens ?? 8192
-        );
-        renderMemoryPanel();
-        showToast('Memory updated', 'success');
-    }
-}
-
 // ============ DELETE MESSAGE ============
 async function deleteMessageFrom(msgId) {
     if (!confirm('Delete this message and all messages after it?')) return;
@@ -743,7 +682,6 @@ async function deleteMessageFrom(msgId) {
 
     if (deletedSeqIds.length) {
         currentMemory = await pruneMemoryByMsgIds(currentChat.id, deletedSeqIds) ?? currentMemory;
-        if (memoryPanelOpen) renderMemoryPanel();
     }
 
     const last = remaining.at(-1);
@@ -1147,8 +1085,7 @@ window.app = {
     selectCharacterAndClose,
     editCharacterFromList,
 
-    toggleMemoryPanel,
-    refreshMemory,
+    openMemories,
 
     generateSummary,
 

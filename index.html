@@ -61,7 +61,7 @@
         <div class="chat-header">
             <button class="menu-btn" id="menu-btn" onclick="app.toggleSidebar()" aria-label="Menu">&#9776;</button>
             <div class="chat-header-buttons">
-                <button class="hdr-btn" onclick="app.toggleMemoryPanel()" title="View companion memory">&#129504; Memory</button>
+                <button class="hdr-btn" onclick="app.openMemories()" title="View companion memory">&#129504; Memory</button>
                 <button class="hdr-btn" onclick="app.generateSummary()"   title="Generate summary">&#128203; Summary</button>
                 <button class="hdr-btn" onclick="app.openChatSettings()"  title="Chat settings">&#9881;&#65039; Chat</button>
                 <button class="hdr-btn" onclick="app.exportCurrentChat()" title="Export chat">&#128228; Export</button>
@@ -92,20 +92,6 @@
         </div>
 
     </main>
-
-    <!-- MEMORY PANEL -->
-    <aside class="memory-panel" id="memory-panel">
-        <div class="memory-panel-header">
-            <h3>&#129504; Companion Memory</h3>
-            <button class="icon-btn" onclick="app.toggleMemoryPanel()">&#10005;</button>
-        </div>
-        <div class="memory-panel-body" id="memory-panel-body">
-            <p class="memory-empty">Open a chat to view memory</p>
-        </div>
-        <div class="memory-panel-footer">
-            <button class="btn-secondary small" onclick="app.refreshMemory()">&#128260; Refresh Memory</button>
-        </div>
-    </aside>
 
     <!-- SCROLL BUTTONS -->
     <div class="scroll-buttons">

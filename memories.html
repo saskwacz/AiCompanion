@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0, user-scalable=yes">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Pamięć — AiComp</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="subpage-body">
+
+<div id="toast-container"></div>
+
+<div class="subpage-layout">
+
+    <header class="subpage-header">
+        <button class="back-btn" onclick="goBack()">&#8592; Powrót</button>
+        <h1 class="subpage-title" id="page-title">Pamięć towarzysza</h1>
+        <div class="subpage-header-actions">
+            <button class="btn-secondary" id="btn-refresh" onclick="refreshMemory()" title="Odśwież pamięć na podstawie ostatniej wymiany">
+                &#128260; Odśwież
+            </button>
+        </div>
+    </header>
+
+    <div class="subpage-content" id="memory-content">
+        <div class="summary-loading">
+            <div class="typing-indicator">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+            </div>
+            <p>Wczytywanie…</p>
+        </div>
+    </div>
+
+    <footer class="subpage-footer">
+        <span id="memory-info" class="summary-info"></span>
+        <div class="footer-spacer"></div>
+        <button class="btn-secondary" onclick="goBack()">Zamknij</button>
+    </footer>
+
+</div>
+
+<script type="module" src="scripts/memories-page.js"></script>
+</body>
+</html>

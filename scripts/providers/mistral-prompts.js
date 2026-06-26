@@ -15,20 +15,24 @@ import {
     buildChatSystemPrompt,
 } from './gemini-prompts.js';
 
-export { selectChatMessages };
+import {
+    buildMemoryUpdatePrompt as sharedMemoryUpdate,
+    buildMemorySeedPrompt   as sharedMemorySeed,
+} from './memory-prompt-shared.js';
 
-// ─── Language-aware builders (delegated to pl/en modules) ─────────────────────
+export { selectChatMessages };
 
 export function buildSystemPrompt(lang, character, memCtx) {
     return getPrompts(lang).buildSystemPrompt(character, memCtx);
 }
 
+/** Mistral: ultra-compact memory prompts (smaller default models). */
 export function buildMemoryUpdatePrompt(lang, existing, character, recentMessages, userMsg, aiMsg) {
-    return getPrompts(lang).buildMemoryUpdatePrompt(existing, character, recentMessages, userMsg, aiMsg);
+    return sharedMemoryUpdate(lang, existing, character, recentMessages, userMsg, aiMsg, { ultra: true });
 }
 
 export function buildMemorySeedPrompt(lang, character) {
-    return getPrompts(lang).buildMemorySeedPrompt(character);
+    return sharedMemorySeed(lang, character, { ultra: true });
 }
 
 export function buildSummaryPrompt(lang, opts) {

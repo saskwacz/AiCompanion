@@ -2,7 +2,9 @@ import { getChatById, createChat, updateChat }              from './chats.js';
 import { getCharacterById, createCharacter, saveCharacterAvatar, getCharacterAvatar } from './characters.js';
 import { getMessagesForChat, addMessage }                  from './messages.js';
 import { getMemoryForChat, saveMemory, memoryForExport, memoryFromImport } from './memory.js';
-import { getSummaryState, saveSummaryState }               from './summary.js';
+import { getSummaryState, saveSummaryState,
+         summaryForExport, summaryFromImport }              from './summary.js';
+import { normalizeChatConfig }                             from './chat-config.js';
 
 // ============ HELPERS ============
 /** Convert Blob to base64 string */
@@ -43,16 +45,16 @@ export async function exportChat(chatId) {
     const avatarBase64 = await blobToBase64(avatarBlob);
 
     const data = {
-        version:    5,
+        version:    6,
         exportedAt: new Date().toISOString(),
         character:  { ...character, id: undefined, avatarBase64 },
         chat: {
             ...chat,
             id:          undefined,
             characterId: undefined,
-            // API keys are exported so the user can restore a full backup.
-            // Recipient should treat this file as sensitive.
-            config: chat.config ?? null,
+            // Full per-provider config (Gemini, Mistral, Groq, OpenRouter, OpenAI, Claude, Ollama).
+            // API keys are included — treat export files as sensitive.
+            config: normalizeChatConfig(chat.config),
         },
         messages: messages.map(m => ({
             role:      m.role,
@@ -60,14 +62,7 @@ export async function exportChat(chatId) {
             timestamp: m.timestamp,
         })),
         memory:  memoryForExport(memory),
-        summary: summaryState
-            ? {
-                rolling:  summaryState.rolling  ?? null,
-                chunks:   summaryState.chunks   ?? [],
-                medium:   summaryState.medium   ?? [],
-                global:   summaryState.global   ?? null,
-              }
-            : null,
+        summary: summaryForExport(summaryState),
     };
 
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -114,8 +109,8 @@ export function importChatFromFile(file) {
                     }
                 }
 
-                // Re-create chat — restore config including API keys
-                const importedConfig = data.chat?.config ?? null;
+                // Re-create chat — normalize config (legacy v1–v5 + all providers)
+                const importedConfig = normalizeChatConfig(data.chat?.config ?? null);
                 const chat = await createChat(character.id, importedConfig);
                 await updateChat(chat.id, {
                     title:           data.chat?.title  || 'Imported Chat',
@@ -134,31 +129,9 @@ export function importChatFromFile(file) {
                     await saveMemory(memoryFromImport(data.memory, chat.id));
                 }
 
-                // Re-import summary — support both v5 tiered format and legacy v2–v4 flat format
-                if (data.summary) {
-                    const s = data.summary;
-                    let state;
-                    if ('chunks' in s) {
-                        // v5 tiered format — restore directly
-                        state = {
-                            chatId:  chat.id,
-                            rolling: s.rolling ?? null,
-                            chunks:  s.chunks  ?? [],
-                            medium:  s.medium  ?? [],
-                            global:  s.global  ?? null,
-                        };
-                    } else if (s.text) {
-                        // v2–v4 legacy flat format — wrap as rolling summary
-                        state = {
-                            chatId:  chat.id,
-                            rolling: { text: s.text, updatedAt: s.createdAt ?? Date.now() },
-                            chunks:  [],
-                            medium:  [],
-                            global:  null,
-                        };
-                    }
-                    if (state) await saveSummaryState(state);
-                }
+                // Re-import summary (v6 tiered + legacy v2–v5 flat)
+                const summaryState = summaryFromImport(data.summary, chat.id);
+                if (summaryState) await saveSummaryState(summaryState);
 
                 resolve({ character, chat });
             } catch (err) {

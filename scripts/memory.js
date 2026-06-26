@@ -4,6 +4,7 @@ import {
     buildMemoryUpdatePrompt as providerBuildMemoryUpdatePrompt,
     buildMemorySeedPrompt   as providerBuildMemorySeedPrompt,
 } from './providers/index.js';
+import { expandRemoveKeys } from './providers/memory-prompt-shared.js';
 
 export const MEMORY_SCHEMA_VERSION = 3;
 
@@ -13,9 +14,10 @@ export const MEMORY_KEYS = [
     'charProfile', 'charGoals', 'charMemories',
 ];
 
-export const MEMORY_TOP_K        = 20;
+export const MEMORY_TOP_K        = 15;
 export const MEMORY_MIN_SCORE    = 0.28;
-export const MEMORY_FALLBACK_PER = 8;
+export const MEMORY_FALLBACK_PER = 6;
+export const MEMORY_MAX_ITEMS    = 15;
 export const EMBEDDING_DIM       = 768;
 const EMBED_BATCH_SIZE           = 32;
 
@@ -286,7 +288,7 @@ function formatMemoryContext(items) {
     if (userGoalParts.length) parts.push(`[GOALS — user's goals]\n${userGoalParts.join('\n')}`);
 
     const ctx  = parts.join('\n\n');
-    const note = '\n\n[NOTE] Memory items are ranked by relevance to the current message. Timestamps [since: …] mark when a fact was first learned.';
+    const note = '\n[NOTE] [since:…]=chronology. [rel:…]=relevance.';
     return ctx + note;
 }
 
@@ -375,7 +377,7 @@ async function selectForUpdatePrompt(existing, exchangeText, embedCfg) {
             .map(item => ({ ...item, score: cosineSimilarity(queryEmb, item.embedding) }))
             .filter(i => i.score >= 0.15)
             .sort((a, b) => b.score - a.score)
-            .slice(0, 30);
+            .slice(0, 20);
 
         const selectedIds  = new Set([...scored.map(i => i.id), ...alwaysIds]);
         const promptMemory = filterMemoryToIds(existing, selectedIds);
@@ -394,13 +396,13 @@ async function selectForUpdatePrompt(existing, exchangeText, embedCfg) {
  * @param {object[]} existingItems  - current items for this section
  * @param {string[]} newStrings     - strings returned by the LLM for this section
  * @param {*}        aiMsgSeqId     - message seq id for new items
- * @param {Set|null} selectedIds    - IDs of items that were shown to the LLM.
- *   null  → keep-all mode (seeding): never delete, only add/update existing.
- *   Set   → selective mode:
- *             • item in selectedIds  + returned by LLM  → updated
- *             • item in selectedIds  + NOT returned      → DELETED (LLM dropped it)
- *             • item NOT in selectedIds                  → PRESERVED (LLM never saw it)
- *             • new string not matching any existing     → ADDED
+ * @param {Set|null} selectedIds    - IDs of items shown to the LLM.
+ *   null  → keep-all mode (goals): never delete, only add/update existing.
+ *   Set   → selective mode (delta prompt):
+ *             • returned + matched  → updated
+ *             • not returned        → preserved unchanged
+ *             • new string          → added
+ *   Deletions use explicit "remove" arrays in the LLM response.
  */
 function mergeItems(existingItems, newStrings, aiMsgSeqId = null, selectedIds = null) {
     const now      = Date.now();
@@ -443,11 +445,10 @@ function mergeItems(existingItems, newStrings, aiMsgSeqId = null, selectedIds = 
                 createdAtMsgId: item.createdAtMsgId ?? aiMsgSeqId,
                 embedding:      textChanged ? null : (item.embedding ?? null),
             });
-        } else if (!selectedIds) {
-            // keep-all / seeding mode: preserve items the LLM didn't explicitly return
+        } else {
+            // Not returned by LLM → preserve (delta prompt; delete via "remove" only)
             result.push(item);
         }
-        // selective mode + not returned → item intentionally dropped by LLM → skip
     }
 
     for (let idx = 0; idx < newArr.length; idx++) {
@@ -471,22 +472,39 @@ function toStr(arr) {
         .filter(Boolean);
 }
 
+function applyRemovals(items, removeTexts) {
+    if (!removeTexts?.length) return items;
+    return items.filter(item => {
+        const n = norm(item.text);
+        return !removeTexts.some(r => {
+            const rn = norm(r);
+            return rn && (n === rn || n.includes(rn) || rn.includes(n));
+        });
+    });
+}
+
+function capItems(items, max = MEMORY_MAX_ITEMS) {
+    if (items.length <= max) return items;
+    return [...items].sort((a, b) => (b.firstSeen || 0) - (a.firstSeen || 0)).slice(0, max);
+}
+
 function parseMemoryResponse(raw) {
     const u = raw.user ?? {};
     const c = raw.character ?? {};
 
-    const profile     = toStr(raw.profile ?? u.profile);
-    const charProfile = toStr(raw.charProfile ?? c.charProfile);
+    const profile     = toStr(raw.profile ?? u.profile ?? raw.p ?? u.p);
+    const charProfile = toStr(raw.charProfile ?? c.charProfile ?? raw.cp ?? c.cp);
 
     return {
         profile:     profile.length     ? profile     : toStr(raw.facts ?? u.facts)
             .concat(toStr(raw.preferences ?? u.preferences), toStr(raw.relationships ?? u.relationships)),
-        goals:       toStr(raw.goals       ?? u.goals),
-        memories:    toStr(raw.memories    ?? u.memories),
-        charProfile: charProfile.length   ? charProfile : toStr(raw.charFacts ?? c.charFacts)
+        goals:       toStr(raw.goals       ?? u.goals       ?? raw.g  ?? u.g),
+        memories:    toStr(raw.memories    ?? u.memories    ?? raw.m  ?? u.m),
+        charProfile: charProfile.length   ? charProfile   : toStr(raw.charFacts ?? c.charFacts)
             .concat(toStr(raw.charPreferences ?? c.charPreferences), toStr(raw.charPersonality ?? c.charPersonality)),
-        charGoals:   toStr(raw.charGoals   ?? c.charGoals),
-        charMemories: toStr(raw.charMemories ?? c.charMemories),
+        charGoals:    toStr(raw.charGoals    ?? c.charGoals    ?? raw.cg ?? c.cg),
+        charMemories: toStr(raw.charMemories ?? c.charMemories ?? raw.cm ?? c.cm),
+        remove:       expandRemoveKeys(raw.remove),
     };
 }
 
@@ -538,6 +556,11 @@ export async function computeMemoryUpdate(chatId, userMsg, aiMsg, cfg, character
         charGoals:    miKeepAll(  'charGoals',    existing.charGoals),
         charMemories: miSelective('charMemories', existing.charMemories),
     };
+
+    for (const key of MEMORY_KEYS) {
+        updated[key] = applyRemovals(updated[key], flat.remove?.[key]);
+        updated[key] = capItems(updated[key]);
+    }
 
     const activeCfg = embedCfg || cfg;
     return activeCfg ? await ensureEmbeddings(updated, activeCfg) : updated;
