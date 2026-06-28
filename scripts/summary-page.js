@@ -7,10 +7,8 @@ import { getChatById }                                  from './chats.js';
 import { getCharacterById }                             from './characters.js';
 import { getMessagesForChat }                           from './messages.js';
 import { resolveChatConfig, resolveModel }              from './chat-config.js';
-import { getShuffledApiKeys, getShuffledMistralApiKeys,
-         getShuffledGroqApiKeys, getShuffledOpenRouterApiKeys,
-         getShuffledOpenaiApiKeys, getShuffledClaudeApiKeys } from './settings.js';
-import { GEMINI_DEFAULTS }                              from './providers/gemini-models.js';
+import { getShuffledMistralApiKeys } from './settings.js';
+import { MISTRAL_DEFAULTS } from './providers/mistral-models.js';
 import {
     getSummaryState, saveSummaryState, deleteSummaryForChat,
     computeMedium, computeGlobal,
@@ -65,46 +63,12 @@ async function init() {
 
 // ─── Provider config builder ─────────────────────────────────────────────────
 function buildProviderCfg(cfg, role) {
-    const taskCfg  = cfg[role] || GEMINI_DEFAULTS[role] || {};
-    const provider = taskCfg.provider || 'gemini';
-
-    let model, modelFallback, keys;
-    if (provider === 'ollama') {
-        model         = taskCfg.ollamaModel || null;
-        modelFallback = null;
-        keys          = [];
-    } else if (provider === 'mistral') {
-        model         = taskCfg.mistralModel || null;
-        modelFallback = taskCfg.mistralModelFallback || null;
-        keys          = getShuffledMistralApiKeys(cfg);
-    } else if (provider === 'groq') {
-        model         = taskCfg.groqModel || null;
-        modelFallback = taskCfg.groqModelFallback || null;
-        keys          = getShuffledGroqApiKeys(cfg);
-    } else if (provider === 'openrouter') {
-        model         = taskCfg.openrouterModel || null;
-        modelFallback = taskCfg.openrouterModelFallback || null;
-        keys          = getShuffledOpenRouterApiKeys(cfg);
-    } else if (provider === 'openai') {
-        model         = taskCfg.openaiModel || null;
-        modelFallback = taskCfg.openaiModelFallback || null;
-        keys          = getShuffledOpenaiApiKeys(cfg);
-    } else if (provider === 'claude') {
-        model         = taskCfg.claudeModel || null;
-        modelFallback = taskCfg.claudeModelFallback || null;
-        keys          = getShuffledClaudeApiKeys(cfg);
-    } else {
-        model         = taskCfg.geminiModel || null;
-        modelFallback = taskCfg.geminiModelFallback || null;
-        keys          = getShuffledApiKeys(cfg);
-    }
-
+    const taskCfg = cfg[role] || MISTRAL_DEFAULTS[role] || {};
     return {
-        provider,
-        keys,
-        ollamaUrl:     cfg.ollamaBaseUrl || 'http://localhost:11434',
-        model:         model ?? resolveModel(taskCfg),
-        modelFallback,
+        provider:      'mistral',
+        keys:          getShuffledMistralApiKeys(cfg),
+        model:         taskCfg.mistralModel ?? resolveModel(taskCfg),
+        modelFallback: taskCfg.mistralModelFallback || null,
         lang:          cfg.chatLang || 'pl',
     };
 }

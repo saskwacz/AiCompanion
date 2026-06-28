@@ -1,204 +1,109 @@
 /**
- * chat-config.js
- *
- * Shared utilities for building and resolving per-chat configurations.
- * Imported by main.js, character-editor.js, chat-settings-page.js.
+ * chat-config.js — Per-chat configuration with extensible service tasks.
  */
 
-import { PROVIDER_NAMES }       from './settings.js';
-import { GEMINI_DEFAULTS }      from './providers/gemini-models.js';
-import { MISTRAL_DEFAULTS }     from './providers/mistral-models.js';
-import { GROQ_DEFAULTS }        from './providers/groq-models.js';
-import { OPENROUTER_DEFAULTS }  from './providers/openrouter-models.js';
-import { OPENAI_DEFAULTS }      from './providers/openai-models.js';
-import { CLAUDE_DEFAULTS }      from './providers/claude-models.js';
+import { MISTRAL_DEFAULTS } from './providers/mistral-models.js';
+import { SERVICE_IDS } from './companion/config/serviceRegistry.js';
 
-export { GEMINI_DEFAULTS, MISTRAL_DEFAULTS, GROQ_DEFAULTS, OPENROUTER_DEFAULTS, OPENAI_DEFAULTS, CLAUDE_DEFAULTS };
+export { MISTRAL_DEFAULTS };
 
-const TASKS = ['chat', 'memory', 'summary', 'embed'];
+const LLM_TASKS = ['chat', 'memory', 'summary', 'goals', 'emotion', 'relationship', 'embed'];
 
-/**
- * Migrate any legacy config format to the current nested structure.
- *
- * Handles two legacy formats:
- *  v1 — very old flat keys like chatProvider, chatModel, temperature, …
- *  v2 — nested tasks but with a single `model` instead of geminiModel/ollamaModel
- */
-export function migrateConfig(cfg) {
-    if (!cfg) return null;
-
-    // ── v2 → current: replace task.model with task.geminiModel / task.ollamaModel ──
-    if (cfg.chat && typeof cfg.chat === 'object') {
-        const needsModelSplit = TASKS.some(
-            r => cfg[r] && 'model' in cfg[r] && !('geminiModel' in cfg[r])
-        );
-        if (!needsModelSplit) return cfg; // already current format
-
-        const result = { ...cfg };
-        for (const role of TASKS) {
-            if (!result[role]) continue;
-            const task = { ...result[role] };
-            if ('model' in task && !('geminiModel' in task)) {
-                const provider = task.provider || 'gemini';
-                const def      = GEMINI_DEFAULTS[role] || {};
-                const modelVal = task.model;
-                if (provider === 'ollama') {
-                    task.ollamaModel = modelVal || def.ollamaModel;
-                } else if (provider === 'mistral') {
-                    task.mistralModel = modelVal || MISTRAL_DEFAULTS[role]?.mistralModel;
-                } else if (provider === 'groq') {
-                    task.groqModel = modelVal || GROQ_DEFAULTS[role]?.groqModel;
-                } else if (provider === 'openrouter') {
-                    task.openrouterModel = modelVal || OPENROUTER_DEFAULTS[role]?.openrouterModel;
-                } else if (provider === 'openai') {
-                    task.openaiModel = modelVal || OPENAI_DEFAULTS[role]?.openaiModel;
-                } else if (provider === 'claude') {
-                    task.claudeModel = modelVal || CLAUDE_DEFAULTS[role]?.claudeModel;
-                } else {
-                    task.geminiModel = modelVal || def.geminiModel;
-                }
-                task.geminiModel   = task.geminiModel   ?? def.geminiModel;
-                task.ollamaModel   = task.ollamaModel   ?? def.ollamaModel;
-                delete task.model;
-            }
-            result[role] = task;
-        }
-        return result;
-    }
-
-    // ── v1 → current: flat keys → nested ──
+function pickMistralTask(stored, role) {
+    const base = MISTRAL_DEFAULTS[role] || {};
+    const src  = stored?.[role] || {};
     return {
-        chat: {
-            provider:      cfg.chatProvider    || 'gemini',
-            temperature:   cfg.temperature     ?? GEMINI_DEFAULTS.chat.temperature,
-            maxTokens:     cfg.maxTokens       ?? GEMINI_DEFAULTS.chat.maxTokens,
-            contextTokens: cfg.contextTokens   ?? GEMINI_DEFAULTS.chat.contextTokens,
-            geminiModel:   cfg.chatModel       || GEMINI_DEFAULTS.chat.geminiModel,
-            ollamaModel:   GEMINI_DEFAULTS.chat.ollamaModel,
-        },
-        memory: {
-            provider:    cfg.memoryProvider  || 'gemini',
-            temperature: GEMINI_DEFAULTS.memory.temperature,
-            maxTokens:   cfg.memoryTokens    ?? GEMINI_DEFAULTS.memory.maxTokens,
-            geminiModel: cfg.memoryModel     || GEMINI_DEFAULTS.memory.geminiModel,
-            ollamaModel: GEMINI_DEFAULTS.memory.ollamaModel,
-        },
-        summary: {
-            provider:    cfg.summaryProvider || 'gemini',
-            temperature: GEMINI_DEFAULTS.summary.temperature,
-            maxTokens:   cfg.summaryTokens   ?? GEMINI_DEFAULTS.summary.maxTokens,
-            everyN:      cfg.summaryEvery    ?? GEMINI_DEFAULTS.summary.everyN,
-            geminiModel: cfg.summaryModel    || GEMINI_DEFAULTS.summary.geminiModel,
-            ollamaModel: GEMINI_DEFAULTS.summary.ollamaModel,
-        },
-        embed: {
-            provider:    cfg.embedProvider || 'gemini',
-            geminiModel: cfg.embedModel    || GEMINI_DEFAULTS.embed.geminiModel,
-            ollamaModel: GEMINI_DEFAULTS.embed.ollamaModel,
-        },
-        apiKeys:           cfg.apiKeys           || [],
-        mistralApiKeys:    cfg.mistralApiKeys    || [],
-        groqApiKeys:       cfg.groqApiKeys       || [],
-        openrouterApiKeys: cfg.openrouterApiKeys || [],
-        openaiApiKeys:     cfg.openaiApiKeys     || [],
-        claudeApiKeys:     cfg.claudeApiKeys     || [],
-        ollamaBaseUrl:     cfg.ollamaBaseUrl     || 'http://localhost:11434',
-        chatLang:          cfg.chatLang          || 'pl',
+        provider:             'mistral',
+        temperature:          src.temperature          ?? base.temperature,
+        maxTokens:            src.maxTokens            ?? base.maxTokens,
+        contextTokens:        src.contextTokens        ?? base.contextTokens,
+        everyN:               src.everyN               ?? base.everyN,
+        useLLM:               src.useLLM               ?? base.useLLM,
+        mistralModel:         src.mistralModel         ?? base.mistralModel,
+        mistralModelFallback: src.mistralModelFallback ?? base.mistralModelFallback ?? null,
     };
 }
 
-/**
- * Normalize a raw chat config for export/import round-trip.
- * Migrates legacy formats and merges all provider defaults.
- */
+function pickDeterministicTask(stored, role) {
+    const base = MISTRAL_DEFAULTS[role] || {};
+    const src  = stored?.[role] || {};
+    return {
+        provider: src.provider ?? base.provider ?? 'deterministic',
+        enabled:  src.enabled  ?? base.enabled  ?? true,
+    };
+}
+
+export function migrateConfig(cfg) {
+    if (!cfg) return null;
+
+    const stored = cfg.chat && typeof cfg.chat === 'object' ? cfg : null;
+    const base   = stored || cfg;
+
+    const result = {
+        mistralApiKeys: base.mistralApiKeys || base.apiKeys || [],
+        chatLang:       base.chatLang || 'pl',
+        prompts:        base.prompts || {},
+    };
+
+    for (const role of LLM_TASKS) {
+        result[role] = pickMistralTask(base, role);
+    }
+    result.initiative   = pickDeterministicTask(base, 'initiative');
+    result.consistency  = pickDeterministicTask(base, 'consistency');
+
+    return result;
+}
+
 export function normalizeChatConfig(cfg) {
     return resolveChatConfig({ config: cfg ?? null });
 }
 
-/**
- * Merge a stored chat.config (after migration) with GEMINI_DEFAULTS so
- * every field is guaranteed to exist.
- */
 export function resolveChatConfig(chat) {
     if (!chat?.config) return buildDefaultChatConfig();
     const stored = migrateConfig(chat.config) || {};
-    return {
-        chat:    { ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,    ...OPENROUTER_DEFAULTS.chat,    ...OPENAI_DEFAULTS.chat,    ...CLAUDE_DEFAULTS.chat,    ...(stored.chat    || {}) },
-        memory:  { ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,  ...OPENROUTER_DEFAULTS.memory,  ...OPENAI_DEFAULTS.memory,  ...CLAUDE_DEFAULTS.memory,  ...(stored.memory  || {}) },
-        summary: { ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary, ...OPENROUTER_DEFAULTS.summary, ...OPENAI_DEFAULTS.summary, ...CLAUDE_DEFAULTS.summary, ...(stored.summary || {}) },
-        embed:   { ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,   ...OPENROUTER_DEFAULTS.embed,   ...OPENAI_DEFAULTS.embed,   ...CLAUDE_DEFAULTS.embed,   ...(stored.embed   || {}) },
-        apiKeys:           stored.apiKeys           || [],
-        mistralApiKeys:    stored.mistralApiKeys    || [],
-        groqApiKeys:       stored.groqApiKeys       || [],
-        openrouterApiKeys: stored.openrouterApiKeys || [],
-        openaiApiKeys:     stored.openaiApiKeys     || [],
-        claudeApiKeys:     stored.claudeApiKeys     || [],
-        ollamaBaseUrl:     stored.ollamaBaseUrl     || 'http://localhost:11434',
-        chatLang:          stored.chatLang          || 'pl',
+    const result = {
+        mistralApiKeys: stored.mistralApiKeys || [],
+        chatLang:       stored.chatLang || 'pl',
+        prompts:        stored.prompts || {},
     };
+    for (const role of SERVICE_IDS) {
+        result[role] = {
+            ...(MISTRAL_DEFAULTS[role] || {}),
+            ...(stored[role] || {}),
+        };
+    }
+    return result;
 }
 
-function resolveDefaultProvider(value) {
-    return PROVIDER_NAMES.includes(value) ? value : 'gemini';
-}
-
-/**
- * Build a fresh chat config seeded with global API keys, Ollama URL, and default providers.
- */
-export function buildDefaultChatConfig(
-    globalApiKeys = [],
-    ollamaBaseUrl = 'http://localhost:11434',
-    globalMistralApiKeys = [],
-    globalGroqApiKeys = [],
-    globalOpenRouterApiKeys = [],
-    globalOpenaiApiKeys = [],
-    globalClaudeApiKeys = [],
-    defaultProviders = {},
-) {
-    return {
-        chat:    {
-            ...GEMINI_DEFAULTS.chat,    ...MISTRAL_DEFAULTS.chat,    ...GROQ_DEFAULTS.chat,
-            ...OPENROUTER_DEFAULTS.chat, ...OPENAI_DEFAULTS.chat,    ...CLAUDE_DEFAULTS.chat,
-            provider: resolveDefaultProvider(defaultProviders.chat),
-        },
-        memory:  {
-            ...GEMINI_DEFAULTS.memory,  ...MISTRAL_DEFAULTS.memory,  ...GROQ_DEFAULTS.memory,
-            ...OPENROUTER_DEFAULTS.memory, ...OPENAI_DEFAULTS.memory,  ...CLAUDE_DEFAULTS.memory,
-            provider: resolveDefaultProvider(defaultProviders.memory),
-        },
-        summary: {
-            ...GEMINI_DEFAULTS.summary, ...MISTRAL_DEFAULTS.summary, ...GROQ_DEFAULTS.summary,
-            ...OPENROUTER_DEFAULTS.summary, ...OPENAI_DEFAULTS.summary, ...CLAUDE_DEFAULTS.summary,
-            provider: resolveDefaultProvider(defaultProviders.summary),
-        },
-        embed:   {
-            ...GEMINI_DEFAULTS.embed,   ...MISTRAL_DEFAULTS.embed,   ...GROQ_DEFAULTS.embed,
-            ...OPENROUTER_DEFAULTS.embed, ...OPENAI_DEFAULTS.embed,   ...CLAUDE_DEFAULTS.embed,
-            provider: resolveDefaultProvider(defaultProviders.embed),
-        },
-        apiKeys:           [...(globalApiKeys           || [])],
-        mistralApiKeys:    [...(globalMistralApiKeys    || [])],
-        groqApiKeys:       [...(globalGroqApiKeys       || [])],
-        openrouterApiKeys: [...(globalOpenRouterApiKeys || [])],
-        openaiApiKeys:     [...(globalOpenaiApiKeys     || [])],
-        claudeApiKeys:     [...(globalClaudeApiKeys     || [])],
-        ollamaBaseUrl:     ollamaBaseUrl || 'http://localhost:11434',
-        chatLang:          'pl',
+export function buildDefaultChatConfig(globalMistralApiKeys = []) {
+    const result = {
+        mistralApiKeys: [...(globalMistralApiKeys || [])],
+        chatLang:       'pl',
+        prompts:        {},
     };
+    for (const role of SERVICE_IDS) {
+        result[role] = { ...(MISTRAL_DEFAULTS[role] || {}) };
+    }
+    return result;
 }
 
-/**
- * Resolve the active model for a given task role from a resolved config.
- * Returns null when the model string is empty.
- */
 export function resolveModel(taskCfg) {
     if (!taskCfg) return null;
-    const provider = taskCfg.provider || 'gemini';
-    if (provider === 'ollama')   return taskCfg.ollamaModel  || null;
-    if (provider === 'mistral')  return taskCfg.mistralModel || null;
-    if (provider === 'groq')        return taskCfg.groqModel        || null;
-    if (provider === 'openrouter')  return taskCfg.openrouterModel  || null;
-    if (provider === 'openai')      return taskCfg.openaiModel      || null;
-    if (provider === 'claude')      return taskCfg.claudeModel      || null;
-    return taskCfg.geminiModel || null;
+    return taskCfg.mistralModel || null;
+}
+
+export function buildProviderConfig(chatConfig, role, keys) {
+    const taskCfg = chatConfig[role] || MISTRAL_DEFAULTS[role] || {};
+    return {
+        provider:      taskCfg.provider === 'deterministic' ? 'deterministic' : 'mistral',
+        keys,
+        model:         taskCfg.mistralModel || null,
+        modelFallback: taskCfg.mistralModelFallback || null,
+        lang:          chatConfig.chatLang || 'pl',
+        chatConfig,
+    };
+}
+
+export function getTaskConfig(chatConfig, role) {
+    return chatConfig[role] || MISTRAL_DEFAULTS[role] || {};
 }

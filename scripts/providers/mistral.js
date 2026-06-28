@@ -48,15 +48,8 @@ function isProhibited(err) {
 
 // ─── Key rotation ──────────────────────────────────────────────────────────────
 
-function keyItems(apiKey) {
-    const items = Array.isArray(apiKey) ? [...apiKey] : [apiKey];
-    if (!items.length) throw new Error('No Mistral API key provided');
-    // Shuffle (Fisher-Yates) so each call starts from a different position
-    for (let i = items.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [items[i], items[j]] = [items[j], items[i]];
-    }
-    return items;
+function plainKey(item) {
+    return typeof item === 'string' ? item : item?.key;
 }
 
 function keyLabel(item) {
@@ -64,8 +57,22 @@ function keyLabel(item) {
     return item.label || `…${String(item.key).slice(-6)}`;
 }
 
-function plainKey(item) {
-    return typeof item === 'string' ? item : item.key;
+/** Round-robin: each API call starts with the next key in the pool. */
+let nextKeyIndex = 0;
+
+function keyItems(apiKey) {
+    const items = (Array.isArray(apiKey) ? apiKey : [apiKey])
+        .filter(item => plainKey(item)?.trim());
+    if (!items.length) throw new Error('No Mistral API key provided');
+
+    const start = nextKeyIndex % items.length;
+    nextKeyIndex += 1;
+
+    const rotated = [];
+    for (let i = 0; i < items.length; i++) {
+        rotated.push(items[(start + i) % items.length]);
+    }
+    return rotated;
 }
 
 // ─── Low-level transport ───────────────────────────────────────────────────────

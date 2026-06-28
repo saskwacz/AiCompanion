@@ -3,13 +3,14 @@
  */
 
 import { openDB }                                                        from './db.js';
-import { loadSettings, persistSettings, getShuffledApiKeys }             from './settings.js';
+import { loadSettings, persistSettings, getShuffledMistralApiKeys } from './settings.js';
 import { createCharacter, updateCharacter, deleteCharacterById,
          getCharacterById, getAllCharacters,
          saveCharacterAvatar, getCharacterAvatar, deleteCharacterAvatar } from './characters.js';
 import { getChatsForCharacter, deleteChatById }                         from './chats.js';
 import { deleteAllForChat }                                             from './messages.js';
 import { seedMemoryFromCharacter }                                       from './memory.js';
+import { seedCompanionState }                                            from './companion/pipeline.js';
 import { resolveChatConfig, resolveModel }                              from './chat-config.js';
 import { escapeHtml, showToast }                                        from './ui.js';
 
@@ -168,24 +169,25 @@ async function seedMemoryForAllChats(char) {
         const chatCfg = resolveChatConfig(c);
         const memTask   = chatCfg.memory;
         const embedTask = chatCfg.embed;
-        const memProvider   = memTask.provider   || 'gemini';
-        const embedProvider = embedTask.provider || 'gemini';
         const memCfg = {
-            provider:  memProvider,
-            keys:      getShuffledApiKeys(chatCfg),
-            ollamaUrl: chatCfg.ollamaBaseUrl || 'http://localhost:11434',
-            model:     resolveModel(memTask),
+            provider: 'mistral',
+            keys:     getShuffledMistralApiKeys(chatCfg),
+            model:    resolveModel(memTask),
         };
         const embedCfg = {
-            provider:  embedProvider,
-            keys:      getShuffledApiKeys(chatCfg),
-            ollamaUrl: chatCfg.ollamaBaseUrl || 'http://localhost:11434',
-            model:     resolveModel(embedTask),
+            provider: 'mistral',
+            keys:     getShuffledMistralApiKeys(chatCfg),
+            model:    resolveModel(embedTask),
         };
         setTimeout(async () => {
             try {
-                await seedMemoryFromCharacter(c.id, char, memCfg, null, memTask.maxTokens ?? 8192, embedCfg);
-                console.log(`[CharEditor] Memory seeded for chat ${c.id}`);
+                const seeded = await seedMemoryFromCharacter(
+                    c.id, char, memCfg, null, memTask.maxTokens ?? 8192, embedCfg,
+                );
+                if (seeded) {
+                    await seedCompanionState(c.id, seeded, embedCfg);
+                    console.log(`[CharEditor] Memory seeded for chat ${c.id}`);
+                }
             } catch (e) {
                 console.warn(`[CharEditor] Memory seed failed for chat ${c.id}:`, e);
             }

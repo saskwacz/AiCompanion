@@ -1439,3 +1439,78 @@ body { background-color: var(--background-dark); color: var(--text-primary); ove
     .rate-limit-inline { flex-wrap: wrap; }
     .rate-limit-time   { width: 100%; }
 }
+
+/* ============ COMPANION MEMORY DASHBOARD ============ */
+.dash-section {
+    margin-bottom: 16px;
+    border: 1px solid var(--border-color, rgba(255,255,255,.08));
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--surface-secondary, rgba(15,23,42,.6));
+}
+.dash-section-toggle {
+    width: 100%; text-align: left; padding: 14px 16px;
+    background: transparent; border: none; color: inherit;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+}
+.dash-section-body { padding: 0 16px 16px; }
+.dash-section.collapsed .dash-section-body { display: none; }
+.dash-section.collapsed .dash-chevron { transform: rotate(-90deg); }
+.dash-chevron { transition: transform .2s; opacity: .6; }
+.dash-stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px;
+}
+.dash-stat-card {
+    padding: 12px; border-radius: 10px;
+    background: rgba(255,255,255,.04); text-align: center;
+}
+.dash-stat-icon { font-size: 22px; }
+.dash-stat-label { font-size: 11px; opacity: .7; margin-top: 4px; }
+.dash-stat-value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+.dash-meter { margin-bottom: 10px; }
+.dash-meter-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.dash-meter-track { height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
+.dash-meter-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #6366f1, #8b5cf6); transition: width .3s; }
+.dash-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; background: rgba(99,102,241,.2); margin-right: 4px;
+}
+.dash-badge-type { background: rgba(59,130,246,.25); }
+.dash-badge-validity { background: rgba(16,185,129,.2); }
+.dash-badge-imp { background: rgba(245,158,11,.2); }
+.dash-badge-conf { background: rgba(139,92,246,.2); }
+.dash-badge-tag { background: rgba(255,255,255,.08); }
+.dash-badge-mood { background: rgba(236,72,153,.25); font-size: 13px; }
+.dash-badge-status-active { background: rgba(34,197,94,.25); }
+.dash-badge-status-completed { background: rgba(59,130,246,.25); }
+.dash-badge-status-failed { background: rgba(239,68,68,.25); }
+.dash-card-grid { display: grid; gap: 12px; }
+@media (min-width: 700px) { .dash-card-grid { grid-template-columns: repeat(2, 1fr); } }
+.dash-memory-card, .dash-goal-card {
+    padding: 12px; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.06);
+    background: rgba(0,0,0,.15);
+}
+.dash-memory-head { margin-bottom: 8px; }
+.dash-memory-text { font-size: 14px; line-height: 1.5; margin: 0 0 8px; }
+.dash-memory-foot { font-size: 11px; opacity: .65; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dash-empty { opacity: .6; font-size: 13px; padding: 8px 0; }
+.dash-meta { font-size: 12px; opacity: .55; margin-top: 8px; }
+.dash-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.dash-toolbar .setting-input { flex: 1; min-width: 120px; }
+.dash-mood-row { margin-bottom: 12px; font-size: 13px; }
+.dash-summary-text { line-height: 1.6; white-space: pre-wrap; }
+.dash-world-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.dash-goal-priority { font-weight: 700; color: #a78bfa; }
+.ps-textarea {
+    width: 100%; min-height: 320px; font-family: ui-monospace, monospace;
+    font-size: 13px; padding: 12px; border-radius: 8px;
+    background: rgba(0,0,0,.25); color: inherit; border: 1px solid rgba(255,255,255,.1);
+    resize: vertical; box-sizing: border-box;
+}
+.ps-description { font-size: 13px; opacity: .75; margin: 8px 0 12px; }
+.ps-note { font-size: 12px; padding: 8px 12px; border-radius: 8px; background: rgba(245,158,11,.15); margin-bottom: 12px; }
+.ps-note.hidden { display: none; }
+.ps-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.hidden { display: none !important; }

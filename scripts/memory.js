@@ -4,7 +4,7 @@ import {
     buildMemoryUpdatePrompt as providerBuildMemoryUpdatePrompt,
     buildMemorySeedPrompt   as providerBuildMemorySeedPrompt,
 } from './providers/index.js';
-import { expandRemoveKeys } from './providers/memory-prompt-shared.js';
+import { expandRemoveKeys, parseBioStructuredLines, parseBioStructuredFacts, dropBareSubFacts, filterFactStrings } from './providers/memory-prompt-shared.js';
 
 export const MEMORY_SCHEMA_VERSION = 3;
 
@@ -17,7 +17,6 @@ export const MEMORY_KEYS = [
 export const MEMORY_TOP_K        = 15;
 export const MEMORY_MIN_SCORE    = 0.28;
 export const MEMORY_FALLBACK_PER = 6;
-export const MEMORY_MAX_ITEMS    = 15;
 export const EMBEDDING_DIM       = 768;
 const EMBED_BATCH_SIZE           = 32;
 
@@ -483,11 +482,6 @@ function applyRemovals(items, removeTexts) {
     });
 }
 
-function capItems(items, max = MEMORY_MAX_ITEMS) {
-    if (items.length <= max) return items;
-    return [...items].sort((a, b) => (b.firstSeen || 0) - (a.firstSeen || 0)).slice(0, max);
-}
-
 function parseMemoryResponse(raw) {
     const u = raw.user ?? {};
     const c = raw.character ?? {};
@@ -496,14 +490,14 @@ function parseMemoryResponse(raw) {
     const charProfile = toStr(raw.charProfile ?? c.charProfile ?? raw.cp ?? c.cp);
 
     return {
-        profile:     profile.length     ? profile     : toStr(raw.facts ?? u.facts)
-            .concat(toStr(raw.preferences ?? u.preferences), toStr(raw.relationships ?? u.relationships)),
-        goals:       toStr(raw.goals       ?? u.goals       ?? raw.g  ?? u.g),
-        memories:    toStr(raw.memories    ?? u.memories    ?? raw.m  ?? u.m),
-        charProfile: charProfile.length   ? charProfile   : toStr(raw.charFacts ?? c.charFacts)
-            .concat(toStr(raw.charPreferences ?? c.charPreferences), toStr(raw.charPersonality ?? c.charPersonality)),
-        charGoals:    toStr(raw.charGoals    ?? c.charGoals    ?? raw.cg ?? c.cg),
-        charMemories: toStr(raw.charMemories ?? c.charMemories ?? raw.cm ?? c.cm),
+        profile:     filterFactStrings(profile.length     ? profile     : toStr(raw.facts ?? u.facts)
+            .concat(toStr(raw.preferences ?? u.preferences), toStr(raw.relationships ?? u.relationships))),
+        goals:       filterFactStrings(toStr(raw.goals       ?? u.goals       ?? raw.g  ?? u.g)),
+        memories:    filterFactStrings(toStr(raw.memories    ?? u.memories    ?? raw.m  ?? u.m)),
+        charProfile: filterFactStrings(charProfile.length   ? charProfile   : toStr(raw.charFacts ?? c.charFacts)
+            .concat(toStr(raw.charPreferences ?? c.charPreferences), toStr(raw.charPersonality ?? c.charPersonality))),
+        charGoals:    filterFactStrings(toStr(raw.charGoals    ?? c.charGoals    ?? raw.cg ?? c.cg)),
+        charMemories: filterFactStrings(toStr(raw.charMemories ?? c.charMemories ?? raw.cm ?? c.cm)),
         remove:       expandRemoveKeys(raw.remove),
     };
 }
@@ -514,9 +508,99 @@ async function callMemoryModel(prompt, maxOutputTokens = 4096, cfg, priority = '
 }
 
 async function persistWithEmbeddings(mem, embedCfg) {
-    const withEmb = embedCfg ? await ensureEmbeddings(mem, embedCfg) : mem;
-    await saveMemory(withEmb);
-    return withEmb;
+    try {
+        const withEmb = embedCfg ? await ensureEmbeddings(mem, embedCfg) : mem;
+        await saveMemory(withEmb);
+        return withEmb;
+    } catch (e) {
+        console.warn('[Memory] Embed failed, saving without vectors:', e.message);
+        await saveMemory(mem);
+        return mem;
+    }
+}
+
+function hasApiKeys(cfg) {
+    const keys = cfg?.keys;
+    if (!Array.isArray(keys) || !keys.length) return false;
+    return keys.some(k => (typeof k === 'string' ? k : k?.key)?.trim());
+}
+
+/** Szczegółowy opis postaci — źródło faktów/wspomnień (bez scenariusza i instrukcji). */
+export function collectCharacterBioText(character) {
+    return String(character?.characterDetails || '').trim();
+}
+
+function splitBioIntoLines(bio) {
+    const raw = parseBioStructuredLines(bio);
+    const seen = new Set();
+    return raw.filter(line => {
+        const key = norm(line);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+function dedupeFactStrings(arr) {
+    const seen = new Set();
+    const out = [];
+    for (const text of filterFactStrings(arr)) {
+        const key = norm(text);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(text);
+    }
+    return out;
+}
+
+/**
+ * Deterministic extraction of character facts from bio (no LLM).
+ * Used as fallback when the memory API is unavailable.
+ */
+export function extractBioFactsFromCharacter(character) {
+    const bio = collectCharacterBioText(character);
+    if (!bio.trim()) return null;
+
+    const goalRe = /\b(cel(e|ów)?|chce|chciał|want(s|ed|ing)?|goal|aspir|dąży|planuje|plan(s|ning)?|seek(s|ing)?|pragnie|marzy)\b/i;
+    const memRe  = /\b(wspomnien|pamięt|histori|przeszło|dzieciństw|memory|remember|kiedyś|wcześniej|utracił|stracił|traum|wydarzen|event|past)\b/i;
+
+    const charProfile = [];
+    const charGoals = [];
+    const charMemories = [];
+
+    for (const { text, bucket, fromSection } of parseBioStructuredFacts(bio)) {
+        let target = bucket;
+        if (!fromSection) {
+            if (goalRe.test(text)) target = 'charGoals';
+            else if (memRe.test(text)) target = 'charMemories';
+        }
+        if (target === 'charGoals') charGoals.push(text);
+        else if (target === 'charMemories') charMemories.push(text);
+        else charProfile.push(text);
+    }
+
+    if (!charProfile.length && !charGoals.length && !charMemories.length) {
+        return {
+            charProfile: [bio.trim()],
+            charGoals: [],
+            charMemories: [],
+        };
+    }
+
+    return {
+        charProfile,
+        charGoals,
+        charMemories,
+    };
+}
+
+function mergeSeedFacts(llmFlat, bioFlat) {
+    const out = { ...llmFlat };
+    for (const key of ['charProfile', 'charGoals', 'charMemories']) {
+        // Bio parser is authoritative — LLM may only add extras
+        out[key] = dropBareSubFacts(dedupeFactStrings([...(bioFlat[key] || []), ...(llmFlat[key] || [])]));
+    }
+    return out;
 }
 
 // ============ UPDATE MEMORY AFTER EXCHANGE ============
@@ -559,7 +643,6 @@ export async function computeMemoryUpdate(chatId, userMsg, aiMsg, cfg, character
 
     for (const key of MEMORY_KEYS) {
         updated[key] = applyRemovals(updated[key], flat.remove?.[key]);
-        updated[key] = capItems(updated[key]);
     }
 
     if (!embedCfg) return updated;
@@ -584,28 +667,43 @@ export async function updateMemoryFromExchange(chatId, userMsg, aiMsg, cfg, char
 
 // ============ SEED / REFRESH FROM CHARACTER DEFINITION ============
 export async function seedMemoryFromCharacter(chatId, character, cfg, existingMemory, maxOutputTokens = 8192, embedCfg = null) {
-    const hasContent = character.characterDetails || character.scenario;
-    if (!hasContent) return;
+    if (!collectCharacterBioText(character).trim()) return null;
 
-    const existing = normalizeMemory(existingMemory || await getMemoryForChat(chatId));
-    const prompt   = providerBuildMemorySeedPrompt(cfg, character);
+    const existing   = normalizeMemory(existingMemory || await getMemoryForChat(chatId));
+    const bioFacts   = extractBioFactsFromCharacter(character);
+    let flat         = bioFacts;
 
-    try {
-        const raw  = await callMemoryModel(prompt, maxOutputTokens, cfg, 'batch');
-        const flat = parseMemoryResponse(raw);
-        const mi   = (key, ex) => mergeItems(ex || [], flat[key]);
-
-        const seeded = {
-            chatId,
-            profile:      existing.profile      || [],
-            goals:        existing.goals        || [],
-            memories:     existing.memories     || [],
-            charProfile:  mi('charProfile',  existing.charProfile),
-            charGoals:    mi('charGoals',    existing.charGoals),
-            charMemories: mi('charMemories', existing.charMemories),
-        };
-        return await persistWithEmbeddings(seeded, embedCfg);
-    } catch (e) {
-        console.warn('[Memory] Seed failed:', e.message);
+    if (hasApiKeys(cfg)) {
+        try {
+            const prompt = providerBuildMemorySeedPrompt(cfg, character);
+            const raw    = await callMemoryModel(prompt, maxOutputTokens, cfg, 'batch');
+            flat = mergeSeedFacts(parseMemoryResponse(raw), bioFacts);
+        } catch (e) {
+            console.warn('[Memory] LLM seed failed, using bio parser:', e.message);
+            flat = bioFacts;
+        }
+    } else {
+        console.log('[Memory] No API keys — seeding character facts from bio locally');
     }
+
+    if (!flat) return null;
+
+    const mi = (key, ex) => mergeItems(ex || [], flat[key]);
+    const seeded = {
+        chatId,
+        profile:      existing.profile      || [],
+        goals:        existing.goals        || [],
+        memories:     existing.memories     || [],
+        charProfile:  mi('charProfile',  existing.charProfile),
+        charGoals:    mi('charGoals',    existing.charGoals),
+        charMemories: mi('charMemories', existing.charMemories),
+    };
+
+    console.log('[Memory] Seeded from bio:', {
+        charProfile: seeded.charProfile.length,
+        charGoals: seeded.charGoals.length,
+        charMemories: seeded.charMemories.length,
+    });
+
+    return persistWithEmbeddings(seeded, embedCfg);
 }

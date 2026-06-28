@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0, user-scalable=yes">
+    <meta name="theme-color" content="#0f172a">
+    <title>Prompty AI — AiComp</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="subpage-body">
+
+<div id="toast-container"></div>
+
+<div class="subpage-layout">
+
+    <header class="subpage-header">
+        <button class="back-btn" onclick="goBack()">&#8592; Powrót</button>
+        <h1 class="subpage-title">Prompty i modele usług</h1>
+        <button class="btn-primary" onclick="savePromptSettings()">Zapisz</button>
+    </header>
+
+    <div class="subpage-content subpage-content--wide">
+        <div class="dash-toolbar">
+            <select id="ps-service" class="setting-input" onchange="selectService(this.value)"></select>
+            <span id="ps-model-badge" class="dash-badge"></span>
+        </div>
+        <p id="ps-description" class="ps-description"></p>
+        <div id="ps-deterministic-note" class="ps-note hidden"></div>
+        <textarea id="ps-prompt" class="ps-textarea" rows="18" spellcheck="false"></textarea>
+        <div class="ps-actions">
+            <button class="btn-secondary" onclick="resetCurrentPrompt()">Przywróć domyślny</button>
+            <button class="btn-secondary" onclick="exportPrompts()">Eksportuj JSON</button>
+            <button class="btn-secondary" onclick="importPrompts()">Importuj JSON</button>
+        </div>
+    </div>
+
+    <footer class="subpage-footer">
+        <button class="btn-secondary" onclick="goBack()">Anuluj</button>
+        <button class="btn-primary" onclick="savePromptSettings()">Zapisz</button>
+    </footer>
+
+</div>
+
+<input type="file" id="ps-import-file" accept="application/json,.json" hidden>
+
+<script type="module" src="scripts/prompt-settings-page.js"></script>
+</body>
+</html>

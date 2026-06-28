@@ -2,7 +2,7 @@
 // Stores: characters | chats | messages | memory | settings | summaries | avatars
 
 const DB_NAME = 'aicomp_db';
-const DB_VERSION = 4;
+const DB_VERSION = 6;
 
 let _db = null;
 
@@ -48,6 +48,49 @@ export function openDB() {
             // v4 migration: per-chat sequential message counters
             if (oldVersion < 4 && !db.objectStoreNames.contains('messageSeq')) {
                 db.createObjectStore('messageSeq', { keyPath: 'chatId' });
+            }
+
+            // v5 migration: companion AI object stores (client-side agent state)
+            if (oldVersion < 5) {
+                if (!db.objectStoreNames.contains('companion_memories')) {
+                    const s = db.createObjectStore('companion_memories', { keyPath: 'memory_id' });
+                    s.createIndex('chatId', 'chatId');
+                    s.createIndex('chatId_type', ['chatId', 'type']);
+                }
+                if (!db.objectStoreNames.contains('companion_embeddings')) {
+                    const s = db.createObjectStore('companion_embeddings', { keyPath: 'embedding_id' });
+                    s.createIndex('memory_id', 'memory_id');
+                    s.createIndex('chatId', 'chatId');
+                }
+                if (!db.objectStoreNames.contains('companion_emotions')) {
+                    db.createObjectStore('companion_emotions', { keyPath: 'state_id' });
+                }
+                if (!db.objectStoreNames.contains('companion_goals')) {
+                    const s = db.createObjectStore('companion_goals', { keyPath: 'goal_id' });
+                    s.createIndex('chatId', 'chatId');
+                    s.createIndex('chatId_status', ['chatId', 'status']);
+                }
+                if (!db.objectStoreNames.contains('companion_world_state')) {
+                    db.createObjectStore('companion_world_state', { keyPath: 'chatId' });
+                }
+                if (!db.objectStoreNames.contains('companion_summaries')) {
+                    const s = db.createObjectStore('companion_summaries', { keyPath: 'session_id' });
+                    s.createIndex('chatId', 'chatId');
+                }
+                if (!db.objectStoreNames.contains('companion_initiative_meta')) {
+                    db.createObjectStore('companion_initiative_meta', { keyPath: 'chatId' });
+                }
+            }
+
+            // v6 migration: relationships + initiative queue
+            if (oldVersion < 6) {
+                if (!db.objectStoreNames.contains('companion_relationships')) {
+                    db.createObjectStore('companion_relationships', { keyPath: 'chatId' });
+                }
+                if (!db.objectStoreNames.contains('companion_initiative_queue')) {
+                    const s = db.createObjectStore('companion_initiative_queue', { keyPath: 'initiative_id' });
+                    s.createIndex('chatId', 'chatId');
+                }
             }
         };
 
@@ -101,5 +144,28 @@ export function dbDelete(store, key) {
         const r = db().transaction(store, 'readwrite').objectStore(store).delete(key);
         r.onsuccess = () => res();
         r.onerror   = () => rej(r.error);
+    });
+}
+
+/**
+ * Run a synchronous callback against multiple object stores in one transaction.
+ * Throws inside fn abort the transaction (automatic rollback).
+ * @param {string[]} storeNames
+ * @param {'readonly'|'readwrite'} mode
+ * @param {(stores: Record<string, IDBObjectStore>) => void} fn
+ */
+export function dbTransaction(storeNames, mode, fn) {
+    return new Promise((resolve, reject) => {
+        const tx = db().transaction(storeNames, mode);
+        const stores = Object.fromEntries(storeNames.map(n => [n, tx.objectStore(n)]));
+        tx.oncomplete = () => resolve(undefined);
+        tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
+        tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
+        try {
+            fn(stores);
+        } catch (e) {
+            tx.abort();
+            reject(e);
+        }
     });
 }

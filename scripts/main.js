@@ -1,18 +1,14 @@
 import { openDB }                                                      from './db.js';
-import { loadSettings, persistSettings, getShuffledApiKeys,
-         getShuffledMistralApiKeys, getShuffledGroqApiKeys,
-         getShuffledOpenRouterApiKeys, getShuffledOpenaiApiKeys,
-         getShuffledClaudeApiKeys }                                 from './settings.js';
+import { loadSettings, persistSettings, getShuffledMistralApiKeys } from './settings.js';
 import { getCharacterById, getAllCharacters,
          getCharacterAvatar }                                           from './characters.js';
-import { callChatAPI, buildSystemPrompt, AllModelsRateLimitedError } from './providers/index.js';
 import { createChat, updateChat, deleteChatById,
          getChatById, getChatsForCharacter }                            from './chats.js';
 import { addMessage, getMessagesForChat, deleteMessageById,
          deleteMessagesFrom, deleteAllForChat }                         from './messages.js';
-import { getMemoryForChat, computeMemoryUpdate, persistMemory,
-         seedMemoryFromCharacter, memoryToContext,
-         pruneMemoryByMsgIds }                                          from './memory.js';
+import { runPipeline, seedCompanionState } from './companion/pipeline.js';
+import { recordUserActivity } from './companion/idleService.js';
+import { getMemoryForChat, seedMemoryFromCharacter, pruneMemoryByMsgIds } from './memory.js';
 import { getSummaryState, saveSummaryState, deleteSummaryForChat,
          buildSummaryContext,
          computeRolling, computeChunk, computeMedium, computeGlobal,
@@ -25,93 +21,35 @@ import { exportChat, importChatFromFile }                               from './
 import { escapeHtml, parseMessageMarkup, showToast, formatTimestamp }   from './ui.js';
 
 import {
-    GEMINI_DEFAULTS,
+    MISTRAL_DEFAULTS,
     resolveChatConfig,
     buildDefaultChatConfig as _buildDefault,
 } from './chat-config.js';
 
 // ============ PROVIDER CONFIG ============
 
-/** Format AllModelsRateLimitedError into a short user-visible string. */
-function formatRateLimitMsg(e) {
-    if (!(e instanceof AllModelsRateLimitedError)) return e.message;
-    return e.message; // already contains human-readable time from the constructor
-}
-
-/**
- * Build a providerConfig for a given task role from the current per-chat config.
- * Uses geminiModel or ollamaModel depending on the active provider.
- */
 function getProviderConfig(role = 'chat') {
-    const cfg      = currentChatConfig || GEMINI_DEFAULTS;
-    const taskCfg  = cfg[role] || GEMINI_DEFAULTS[role] || {};
-    const provider = taskCfg.provider || 'gemini';
-
-    let model, modelFallback, keys;
-    if (provider === 'ollama') {
-        model        = taskCfg.ollamaModel || null;
-        modelFallback = null;
-        keys          = [];
-    } else if (provider === 'mistral') {
-        model         = taskCfg.mistralModel || null;
-        modelFallback = taskCfg.mistralModelFallback || null;
-        keys          = getShuffledMistralApiKeys(cfg);
-    } else if (provider === 'groq') {
-        model         = taskCfg.groqModel || null;
-        modelFallback = taskCfg.groqModelFallback || null;
-        keys          = getShuffledGroqApiKeys(cfg);
-    } else if (provider === 'openrouter') {
-        model         = taskCfg.openrouterModel || null;
-        modelFallback = taskCfg.openrouterModelFallback || null;
-        keys          = getShuffledOpenRouterApiKeys(cfg);
-    } else if (provider === 'openai') {
-        model         = taskCfg.openaiModel || null;
-        modelFallback = taskCfg.openaiModelFallback || null;
-        keys          = getShuffledOpenaiApiKeys(cfg);
-    } else if (provider === 'claude') {
-        model         = taskCfg.claudeModel || null;
-        modelFallback = taskCfg.claudeModelFallback || null;
-        keys          = getShuffledClaudeApiKeys(cfg);
-    } else {
-        // gemini (default)
-        model         = taskCfg.geminiModel || null;
-        modelFallback = taskCfg.geminiModelFallback || null;
-        keys          = getShuffledApiKeys(cfg);
-    }
+    const cfg     = currentChatConfig || MISTRAL_DEFAULTS;
+    const taskCfg = cfg[role] || MISTRAL_DEFAULTS[role] || {};
 
     return {
-        provider,
-        keys,
-        ollamaUrl: cfg.ollamaBaseUrl || 'http://localhost:11434',
-        model,
-        modelFallback,
-        lang:      cfg.chatLang || 'pl',
+        provider:      taskCfg.provider === 'deterministic' ? 'deterministic' : 'mistral',
+        keys:          getShuffledMistralApiKeys(cfg),
+        model:         taskCfg.mistralModel || null,
+        modelFallback: taskCfg.mistralModelFallback || null,
+        lang:          cfg.chatLang || 'pl',
+        chatConfig:    cfg,
     };
 }
 
 /** Return the task-level generation params (temperature, maxTokens, …) for a role. */
 function getTaskCfg(role) {
-    const cfg = currentChatConfig || GEMINI_DEFAULTS;
-    return cfg[role] || GEMINI_DEFAULTS[role] || {};
+    const cfg = currentChatConfig || MISTRAL_DEFAULTS;
+    return cfg[role] || MISTRAL_DEFAULTS[role] || {};
 }
 
-/** Build initial chat config for a new chat, seeded with global settings. */
 function buildDefaultChatConfig() {
-    return _buildDefault(
-        settings.apiKeys,
-        settings.ollamaBaseUrl,
-        settings.mistralApiKeys,
-        settings.groqApiKeys,
-        settings.openrouterApiKeys,
-        settings.openaiApiKeys,
-        settings.claudeApiKeys,
-        {
-            chat:    settings.defaultChatProvider,
-            memory:  settings.defaultMemoryProvider,
-            summary: settings.defaultSummaryProvider,
-            embed:   settings.defaultEmbedProvider,
-        },
-    );
+    return _buildDefault(settings.mistralApiKeys);
 }
 
 // ============ STATE ============
@@ -311,6 +249,11 @@ async function createNewChat() {
         if (seeded && currentChat?.id === chat.id) {
             currentMemory = seeded;
         }
+        const memoryForCompanion = seeded || await getMemoryForChat(chat.id);
+        await seedCompanionState(chat.id, memoryForCompanion, embedCfgSeed, {
+            character: currentCharacter,
+            initWorld: true,
+        });
     }, 300);
 }
 
@@ -371,23 +314,8 @@ async function appSendMessage(retryText) {
     const chatCfg  = getProviderConfig('chat');
     const embedCfg = getProviderConfig('embed');
 
-    if (chatCfg.provider === 'gemini'  && !chatCfg.keys.length) {
-        showToast('Dodaj klucz API Gemini w ustawieniach czatu', 'error'); return;
-    }
-    if (chatCfg.provider === 'mistral' && !chatCfg.keys.length) {
+    if (!chatCfg.keys.length) {
         showToast('Dodaj klucz API Mistral w ustawieniach czatu', 'error'); return;
-    }
-    if (chatCfg.provider === 'groq'       && !chatCfg.keys.length) {
-        showToast('Dodaj klucz API Groq w ustawieniach czatu', 'error'); return;
-    }
-    if (chatCfg.provider === 'openrouter' && !chatCfg.keys.length) {
-        showToast('Dodaj klucz API OpenRouter w ustawieniach czatu', 'error'); return;
-    }
-    if (chatCfg.provider === 'openai'     && !chatCfg.keys.length) {
-        showToast('Dodaj klucz API OpenAI w ustawieniach czatu', 'error'); return;
-    }
-    if (chatCfg.provider === 'claude'     && !chatCfg.keys.length) {
-        showToast('Dodaj klucz API Claude w ustawieniach czatu', 'error'); return;
     }
 
     // On retry: the user message may already be saved in DB (from a previous failed attempt).
@@ -422,112 +350,62 @@ async function appSendMessage(retryText) {
     showTypingIndicator();
 
     try {
-        // ── Step 1: get AI response text (not saved to DB yet) ──
-        const memCtx       = await memoryToContext(currentMemory, { query: message, cfg: embedCfg });
-        const systemPrompt = buildSystemPrompt(chatCfg, currentCharacter, memCtx);
-        const chatTask     = getTaskCfg('chat');
+        const memCfg   = getProviderConfig('memory');
+        const sumCfg   = getProviderConfig('summary');
+        const chatId   = currentChat.id;
+        const char     = currentCharacter;
+        const chatTask = getTaskCfg('chat');
 
-        const response = await callChatAPI(chatCfg, {
-            messages:      currentMessages,
-            systemPrompt,
-            chatSummary: {
-                text:    buildSummaryContext(currentChatSummary),
-                rolling: currentChatSummary?.rolling?.text || '',
-            },
-            temperature:   chatTask.temperature,
-            maxTokens:     chatTask.maxTokens,
-            contextTokens: chatTask.contextTokens,
+        const pipelineResult = await runPipeline({
+            chatId,
+            character: char,
+            userInput: message,
+            userMessage: userMsg,
+            messages: [...currentMessages],
+            chatCfg,
+            embedCfg,
+            memoryCfg: memCfg,
+            summaryCfg: sumCfg,
+            goalCfg:        getProviderConfig('goals'),
+            emotionCfg:     getProviderConfig('emotion'),
+            relationshipCfg: getProviderConfig('relationship'),
+            chatTask:           getTaskCfg('chat'),
+            memoryTask:         getTaskCfg('memory'),
+            summaryTask:        getTaskCfg('summary'),
+            goalTask:           getTaskCfg('goals'),
+            emotionTask:        getTaskCfg('emotion'),
+            relationshipTask:   getTaskCfg('relationship'),
         });
 
-        // ── Step 2: compute background tasks (no DB writes, throw on failure) ──
-        const memCfg  = getProviderConfig('memory');
-        const sumCfg  = getProviderConfig('summary');
-        const chatId  = currentChat.id;
-        const char    = currentCharacter;
-        const msgs    = [...currentMessages];    // snapshot without AI msg
-        const state   = currentChatSummary ?? { chatId, rolling: null, chunks: [], medium: [], global: null, prohibitedMsgIds: [] };
-        const maxTok  = getTaskCfg('summary').maxTokens ?? 8192;
-        const doChunk = shouldBuildChunk(msgs, currentChatSummary);
+        currentMessages = [...currentMessages, pipelineResult.assistantMessage];
+        await recordUserActivity(chatId);
 
-        const [computedMem, rollingResult, computedHistoryTiers] = await Promise.all([
-            computeMemoryUpdate(
-                chatId, message, response, memCfg,
-                char, msgs,
-                getTaskCfg('memory').maxTokens ?? 8192,
-                null,
-                embedCfg
-            ),
-            computeRollingFallback(msgs, char, sumCfg, Math.min(maxTok, 4096)),
-            doChunk
-                ? _computeHistoryTiers(state, msgs, char, sumCfg, maxTok)
-                : null,
-        ]);
-
-        // ── Step 3: all computed successfully → commit everything atomically ──
-        const aiMsg = await addMessage(chatId, 'assistant', response);
-        currentMessages = [...currentMessages, aiMsg];
-
-        await persistMemory(computedMem);
-
-        let newState = { ...state };
-        const { rolling: computedRolling, prohibitedIds: rollingProhibitedIds } = rollingResult;
-        if (computedRolling) newState.rolling = computedRolling;
-        if (rollingProhibitedIds?.length) {
-            const existing = new Set(newState.prohibitedMsgIds ?? []);
-            rollingProhibitedIds.forEach(id => existing.add(id));
-            newState.prohibitedMsgIds = [...existing];
-        }
-        if (computedHistoryTiers) {
-            const { newChunk, newMedium, newGlobal, newProhibitedIds } = computedHistoryTiers;
-            if (newChunk) {
-                const unsorted = [...(state.chunks || []), newChunk];
-                newState.chunks = unsorted.sort((a, b) => (a.fromMsg ?? 0) - (b.fromMsg ?? 0));
-            }
-            if (newMedium) newState.medium = [...(state.medium || []), newMedium];
-            if (newGlobal) newState.global  = newGlobal;
-            if (newProhibitedIds?.length) {
-                const existing = new Set(newState.prohibitedMsgIds ?? []);
-                newProhibitedIds.forEach(id => existing.add(id));
-                newState.prohibitedMsgIds = [...existing];
-            }
-        }
-        await saveSummaryState(newState);
-
-        // ── Step 4: update metadata & in-memory state ──
         await updateChat(chatId, {
             messageCount:    currentMessages.length,
-            lastMessage:     response.substring(0, 80),
-            lastMessageTime: aiMsg.timestamp,
+            lastMessage:     pipelineResult.response.substring(0, 80),
+            lastMessageTime: pipelineResult.assistantMessage.timestamp,
             updatedAt:       Date.now(),
         });
 
-        currentMemory      = computedMem;
-        currentChatSummary = newState;
         aiResponseCount++;
+
+        if (pipelineResult.initiative?.content) {
+            console.log('[Companion] Initiative queued:', pipelineResult.initiative);
+        }
 
         lastFailedMessage = null;
         hideRetryBar();
 
-        // ── Step 5: render ──
         renderMessages();
         renderChatList(await getChatsForCharacter(currentCharacter.id));
 
     } catch (err) {
-        // Keep user message in chat. Show error bubble instead of deleting.
-        const isRateLimit = err instanceof AllModelsRateLimitedError;
-        const text = isRateLimit
-            ? formatRateLimitMsg(err)
-            : `Nie udało się przetworzyć wiadomości: ${err.message}`;
+        const text = `Nie udało się przetworzyć wiadomości: ${err.message}`;
 
-        currentChatError = { text, isRateLimit };
+        currentChatError = { text, isRateLimit: false };
         lastFailedMessage = message;
 
-        renderMessages();   // re-renders with error bubble appended
-
-        if (isRateLimit) {
-            document.getElementById('message-input')?.setAttribute('disabled', 'true');
-            document.getElementById('send-btn')?.setAttribute('disabled', 'true');
-        }
+        renderMessages();
     } finally {
         isLoading = false;
         setPendingRequest(-1);
@@ -754,63 +632,18 @@ async function deleteMessageFrom(msgId) {
 // ============ GLOBAL SETTINGS MODAL ============
 async function openSettings() {
     const dp    = document.getElementById('debug-prompts');
-    const obu   = document.getElementById('ollama-base-url');
     const fs    = document.getElementById('chat-font-size');
     const fsVal = document.getElementById('chat-font-size-value');
     const curFs = settings.chatFontSize ?? 14;
 
     if (dp)    dp.checked        = !!settings.debugPrompts;
-    if (obu)   obu.value         = settings.ollamaBaseUrl || 'http://localhost:11434';
     if (fs)    fs.value          = curFs;
     if (fsVal) fsVal.textContent = curFs;
 
-    setVal('default-chat-provider',    settings.defaultChatProvider    || 'gemini');
-    setVal('default-memory-provider',  settings.defaultMemoryProvider  || 'gemini');
-    setVal('default-summary-provider', settings.defaultSummaryProvider || 'gemini');
-    setVal('default-embed-provider',   settings.defaultEmbedProvider   || 'gemini');
-
-    renderApiKeysList();
     renderMistralApiKeysList();
-    renderGroqApiKeysList();
-    renderOpenRouterApiKeysList();
-    renderOpenaiApiKeysList();
-    renderClaudeApiKeysList();
     openModal('settings-modal');
 }
 
-function renderApiKeysList() {
-    const list = document.getElementById('api-keys-list');
-    if (!list) return;
-    const keys = settings.apiKeys || [];
-    list.innerHTML = keys.length
-        ? keys.map((k, i) => `
-            <div class="api-key-item">
-                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
-                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
-                <button class="btn-danger small" onclick="app.removeApiKey(${i})">Usuń</button>
-            </div>`).join('')
-        : '<p class="no-keys">Brak kluczy</p>';
-}
-
-function addApiKeyRow() {
-    const labelEl = document.getElementById('new-key-label');
-    const keyEl   = document.getElementById('new-key-value');
-    const key     = keyEl?.value.trim();
-    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
-    settings.apiKeys = [...(settings.apiKeys || []),
-        { label: labelEl?.value.trim() || `Key ${(settings.apiKeys?.length || 0) + 1}`, key }];
-    if (labelEl) labelEl.value = '';
-    if (keyEl)   keyEl.value   = '';
-    renderApiKeysList();
-}
-
-function removeApiKey(idx) {
-    if (!confirm('Usunąć ten klucz?')) return;
-    settings.apiKeys = settings.apiKeys.filter((_, i) => i !== idx);
-    renderApiKeysList();
-}
-
-// ── Mistral global keys ──
 function renderMistralApiKeysList() {
     const list = document.getElementById('mistral-api-keys-list');
     if (!list) return;
@@ -843,164 +676,17 @@ function removeMistralApiKey(idx) {
     renderMistralApiKeysList();
 }
 
-// ── Groq global keys ──
-function renderGroqApiKeysList() {
-    const list = document.getElementById('groq-api-keys-list');
-    if (!list) return;
-    const keys = settings.groqApiKeys || [];
-    list.innerHTML = keys.length
-        ? keys.map((k, i) => `
-            <div class="api-key-item">
-                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
-                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
-                <button class="btn-danger small" onclick="app.removeGroqApiKey(${i})">Usuń</button>
-            </div>`).join('')
-        : '<p class="no-keys">Brak kluczy</p>';
-}
-
-function addGroqApiKeyRow() {
-    const labelEl = document.getElementById('new-groq-key-label');
-    const keyEl   = document.getElementById('new-groq-key-value');
-    const key     = keyEl?.value.trim();
-    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
-    settings.groqApiKeys = [...(settings.groqApiKeys || []),
-        { label: labelEl?.value.trim() || `Key ${(settings.groqApiKeys?.length || 0) + 1}`, key }];
-    if (labelEl) labelEl.value = '';
-    if (keyEl)   keyEl.value   = '';
-    renderGroqApiKeysList();
-}
-
-function removeGroqApiKey(idx) {
-    if (!confirm('Usunąć ten klucz?')) return;
-    settings.groqApiKeys = settings.groqApiKeys.filter((_, i) => i !== idx);
-    renderGroqApiKeysList();
-}
-
-// ── OpenRouter global keys ──
-function renderOpenRouterApiKeysList() {
-    const list = document.getElementById('openrouter-api-keys-list');
-    if (!list) return;
-    const keys = settings.openrouterApiKeys || [];
-    list.innerHTML = keys.length
-        ? keys.map((k, i) => `
-            <div class="api-key-item">
-                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
-                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
-                <button class="btn-danger small" onclick="app.removeOpenRouterApiKey(${i})">Usuń</button>
-            </div>`).join('')
-        : '<p class="no-keys">Brak kluczy</p>';
-}
-
-function addOpenRouterApiKeyRow() {
-    const labelEl = document.getElementById('new-openrouter-key-label');
-    const keyEl   = document.getElementById('new-openrouter-key-value');
-    const key     = keyEl?.value.trim();
-    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
-    settings.openrouterApiKeys = [...(settings.openrouterApiKeys || []),
-        { label: labelEl?.value.trim() || `Key ${(settings.openrouterApiKeys?.length || 0) + 1}`, key }];
-    if (labelEl) labelEl.value = '';
-    if (keyEl)   keyEl.value   = '';
-    renderOpenRouterApiKeysList();
-}
-
-function removeOpenRouterApiKey(idx) {
-    if (!confirm('Usunąć ten klucz?')) return;
-    settings.openrouterApiKeys = settings.openrouterApiKeys.filter((_, i) => i !== idx);
-    renderOpenRouterApiKeysList();
-}
-
-// ── OpenAI global keys ──
-function renderOpenaiApiKeysList() {
-    const list = document.getElementById('openai-api-keys-list');
-    if (!list) return;
-    const keys = settings.openaiApiKeys || [];
-    list.innerHTML = keys.length
-        ? keys.map((k, i) => `
-            <div class="api-key-item">
-                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
-                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
-                <button class="btn-danger small" onclick="app.removeOpenaiApiKey(${i})">Usuń</button>
-            </div>`).join('')
-        : '<p class="no-keys">Brak kluczy</p>';
-}
-
-function addOpenaiApiKeyRow() {
-    const labelEl = document.getElementById('new-openai-key-label');
-    const keyEl   = document.getElementById('new-openai-key-value');
-    const key     = keyEl?.value.trim();
-    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
-    settings.openaiApiKeys = [...(settings.openaiApiKeys || []),
-        { label: labelEl?.value.trim() || `Key ${(settings.openaiApiKeys?.length || 0) + 1}`, key }];
-    if (labelEl) labelEl.value = '';
-    if (keyEl)   keyEl.value   = '';
-    renderOpenaiApiKeysList();
-}
-
-function removeOpenaiApiKey(idx) {
-    if (!confirm('Usunąć ten klucz?')) return;
-    settings.openaiApiKeys = settings.openaiApiKeys.filter((_, i) => i !== idx);
-    renderOpenaiApiKeysList();
-}
-
-// ── Claude global keys ──
-function renderClaudeApiKeysList() {
-    const list = document.getElementById('claude-api-keys-list');
-    if (!list) return;
-    const keys = settings.claudeApiKeys || [];
-    list.innerHTML = keys.length
-        ? keys.map((k, i) => `
-            <div class="api-key-item">
-                <span class="api-key-label">${escapeHtml(k.label || `Key ${i + 1}`)}</span>
-                <span class="api-key-masked">••••••••${escapeHtml(k.key.slice(-4))}</span>
-                <button class="btn-danger small" onclick="app.removeClaudeApiKey(${i})">Usuń</button>
-            </div>`).join('')
-        : '<p class="no-keys">Brak kluczy</p>';
-}
-
-function addClaudeApiKeyRow() {
-    const labelEl = document.getElementById('new-claude-key-label');
-    const keyEl   = document.getElementById('new-claude-key-value');
-    const key     = keyEl?.value.trim();
-    if (!key) { showToast('Klucz nie może być pusty', 'error'); return; }
-    settings.claudeApiKeys = [...(settings.claudeApiKeys || []),
-        { label: labelEl?.value.trim() || `Key ${(settings.claudeApiKeys?.length || 0) + 1}`, key }];
-    if (labelEl) labelEl.value = '';
-    if (keyEl)   keyEl.value   = '';
-    renderClaudeApiKeysList();
-}
-
-function removeClaudeApiKey(idx) {
-    if (!confirm('Usunąć ten klucz?')) return;
-    settings.claudeApiKeys = settings.claudeApiKeys.filter((_, i) => i !== idx);
-    renderClaudeApiKeysList();
-}
-
 function setVal(id, value) {
     const el = document.getElementById(id);
     if (el) el.value = value;
 }
 
-function setAllDefaultProviders(provider) {
-    setVal('default-chat-provider',    provider);
-    setVal('default-memory-provider',  provider);
-    setVal('default-summary-provider', provider);
-    setVal('default-embed-provider',   provider);
-}
-
 async function handleSaveSettings() {
-    const dp  = document.getElementById('debug-prompts');
-    const obu = document.getElementById('ollama-base-url');
-    const fs  = document.getElementById('chat-font-size');
+    const dp = document.getElementById('debug-prompts');
+    const fs = document.getElementById('chat-font-size');
 
-    if (dp)  settings.debugPrompts  = dp.checked;
-    if (obu) settings.ollamaBaseUrl = obu.value.trim() || 'http://localhost:11434';
-    if (fs)  settings.chatFontSize  = parseInt(fs.value);
-
-    settings.defaultChatProvider    = document.getElementById('default-chat-provider')?.value    || 'gemini';
-    settings.defaultMemoryProvider  = document.getElementById('default-memory-provider')?.value  || 'gemini';
-    settings.defaultSummaryProvider = document.getElementById('default-summary-provider')?.value || 'gemini';
-    settings.defaultEmbedProvider   = document.getElementById('default-embed-provider')?.value   || 'gemini';
-    // mistralApiKeys are mutated in-place by addMistralApiKeyRow / removeMistralApiKey
+    if (dp) settings.debugPrompts = dp.checked;
+    if (fs) settings.chatFontSize = parseInt(fs.value);
 
     window.DEBUG_PROMPTS = !!settings.debugPrompts;
     applyChatFontSize(settings.chatFontSize ?? 14);
@@ -1115,19 +801,8 @@ window.app = {
     openSettings,
     closeSettings:            () => closeModal('settings-modal'),
     saveSettings:             handleSaveSettings,
-    addApiKeyRow,
-    removeApiKey,
     addMistralApiKeyRow,
     removeMistralApiKey,
-    addGroqApiKeyRow,
-    removeGroqApiKey,
-    addOpenRouterApiKeyRow,
-    removeOpenRouterApiKey,
-    addOpenaiApiKeyRow,
-    removeOpenaiApiKey,
-    addClaudeApiKeyRow,
-    removeClaudeApiKey,
-    setAllDefaultProviders,
 
     openChatSettings:         navigateToChatSettings,
     openCharacterEditor:      charId => navigateToCharEditor(charId),

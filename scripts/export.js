@@ -52,8 +52,7 @@ export async function exportChat(chatId) {
             ...chat,
             id:          undefined,
             characterId: undefined,
-            // Full per-provider config (Gemini, Mistral, Groq, OpenRouter, OpenAI, Claude, Ollama).
-            // API keys are included — treat export files as sensitive.
+            // Per-chat Mistral config. API keys are included — treat export files as sensitive.
             config: normalizeChatConfig(chat.config),
         },
         messages: messages.map(m => ({
@@ -109,7 +108,7 @@ export function importChatFromFile(file) {
                     }
                 }
 
-                // Re-create chat — normalize config (legacy v1–v5 + all providers)
+                // Re-create chat — normalize config (legacy formats → Mistral-only)
                 const importedConfig = normalizeChatConfig(data.chat?.config ?? null);
                 const chat = await createChat(character.id, importedConfig);
                 await updateChat(chat.id, {

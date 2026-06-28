@@ -17,9 +17,12 @@
 
     <header class="subpage-header">
         <button class="back-btn" onclick="goBack()">&#8592; Powrót</button>
-        <h1 class="subpage-title" id="page-title">Pamięć towarzysza</h1>
+        <h1 class="subpage-title" id="page-title">Dashboard pamięci</h1>
         <div class="subpage-header-actions">
-            <button class="btn-secondary" id="btn-refresh" onclick="refreshMemory()" title="Odśwież pamięć na podstawie ostatniej wymiany">
+            <button class="btn-secondary" onclick="window.location.href='prompt-settings.html?chatId='+new URLSearchParams(location.search).get('chatId')">
+                &#9881; Prompty
+            </button>
+            <button class="btn-secondary" id="btn-refresh" onclick="refreshMemory()" title="Odśwież z IndexedDB">
                 &#128260; Odśwież
             </button>
         </div>
