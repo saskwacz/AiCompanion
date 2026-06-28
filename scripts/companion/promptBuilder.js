@@ -8,6 +8,7 @@
 
 import { emotionToPromptHints } from './emotionService.js';
 import { buildPrompt } from './prompts/promptConfigService.js';
+import { selectChatMessages } from '../providers/prompts.js';
 
 const DIVIDER = '='.repeat(66);
 
@@ -289,7 +290,16 @@ export function formatRecentConversationSection(ctx) {
     const messages = ctx.recentMessages || [];
     if (!messages.length) return '';
 
-    const body = messages.map(m => {
+    const summaryState = ctx.conversationSummary?.trim()
+        ? { text: ctx.conversationSummary }
+        : null;
+    const selected = selectChatMessages(
+        messages,
+        summaryState,
+        ctx.contextTokens ?? 8000,
+    );
+
+    const body = selected.map(m => {
         const role = m.role === 'assistant' ? 'Companion' : m.role === 'user' ? 'User' : m.role;
         return `${role}: ${m.content}`;
     }).join('\n\n');

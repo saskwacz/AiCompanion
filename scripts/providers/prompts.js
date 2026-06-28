@@ -25,16 +25,50 @@ export function trimMessagesByTokens(messages, maxContextTokens) {
 const RECENT_WINDOW   = 50;
 const CHAT_MSG_WINDOW = 20;
 
+function sameChatMessage(a, b) {
+    if (!a || !b) return false;
+    if (a.id != null && b.id != null) return a.id === b.id;
+    return a.role === b.role && a.content === b.content;
+}
+
+/** First assistant message before any user turn — the welcome opener. */
+export function getOpeningWelcomeMessage(messages) {
+    if (!messages?.length || messages[0].role !== 'assistant') return null;
+    const firstUserIdx = messages.findIndex(m => m.role === 'user');
+    if (firstUserIdx === 0) return null;
+    return messages[0];
+}
+
 export function selectChatMessages(messages, chatSummary, contextTokens) {
+    let recent;
     if (chatSummary?.text || chatSummary?.rolling) {
-        const recent = messages.slice(-CHAT_MSG_WINDOW);
+        recent = messages.slice(-CHAT_MSG_WINDOW);
+    } else {
+        recent = trimMessagesByTokens(messages, contextTokens);
+    }
+
+    if (!recent.length) return recent;
+
+    const welcome = getOpeningWelcomeMessage(messages);
+    if (!welcome) {
         let i = 0;
         while (i < recent.length && recent[i].role !== 'user') i++;
         return recent.slice(i);
     }
-    let recent = trimMessagesByTokens(messages, contextTokens);
-    while (recent.length > 0 && recent[0].role !== 'user') recent = recent.slice(1);
-    return recent;
+
+    const welcomeInRecent = recent.find(m => sameChatMessage(m, welcome));
+    if (!welcomeInRecent) {
+        let i = 0;
+        while (i < recent.length && recent[i].role !== 'user') i++;
+        return recent.slice(i);
+    }
+
+    const firstUserIdx = recent.findIndex(m => m.role === 'user');
+    if (firstUserIdx === -1) return [welcomeInRecent];
+
+    const fromFirstUser = recent.slice(firstUserIdx);
+    if (sameChatMessage(fromFirstUser[0], welcomeInRecent)) return fromFirstUser;
+    return [welcomeInRecent, ...fromFirstUser];
 }
 
 export function buildChatSystemPrompt(systemPrompt, chatSummary) {
