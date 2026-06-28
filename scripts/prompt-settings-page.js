@@ -90,7 +90,7 @@ window.savePromptSettings = async function() {
 };
 
 window.exportPrompts = function() {
-    const data = exportPrompts({ prompts: customPrompts }, chatConfig.chatLang || 'pl');
+    const data = exportPrompts(chatConfig, chatConfig.chatLang || 'pl');
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -109,9 +109,26 @@ document.getElementById('ps-import-file')?.addEventListener('change', async e =>
     try {
         const text = await file.text();
         const data = JSON.parse(text);
-        customPrompts = importPromptsData({ prompts: customPrompts }, data);
+        const result = importPromptsData(chatConfig, data);
+        customPrompts = result.prompts;
+        if (result.mistralApiKeys?.length) {
+            chatConfig.mistralApiKeys = result.mistralApiKeys;
+        }
+        if (result.chatLang) {
+            chatConfig.chatLang = result.chatLang;
+        }
+
+        const chat = await getChatById(chatId);
+        const config = {
+            ...resolveChatConfig(chat),
+            prompts:        customPrompts,
+            mistralApiKeys: chatConfig.mistralApiKeys || [],
+            chatLang:       chatConfig.chatLang || 'pl',
+        };
+        await updateChat(chatId, { config });
+
         selectService(currentService);
-        showToast('Zaimportowano prompty', 'success');
+        showToast('Zaimportowano prompty i klucze Mistral', 'success');
     } catch (err) {
         showToast('Błąd importu: ' + err.message, 'error');
     }

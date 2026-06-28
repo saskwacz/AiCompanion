@@ -1,6 +1,7 @@
 import { DEFAULT_PROMPTS, getDefaultPrompt } from './defaults.js';
 import { renderPrompt } from './renderer.js';
 import { getServiceMeta } from '../config/serviceRegistry.js';
+import { normalizeMistralApiKeys } from '../../settings.js';
 
 /**
  * Resolves prompts from chat config with fallback to defaults.
@@ -38,7 +39,15 @@ export function setPrompt(chatConfig, serviceId, text) {
 
 export function exportPrompts(chatConfig, lang = 'pl') {
     const custom = getPromptsFromConfig(chatConfig);
-    const out = { version: 1, lang, exportedAt: new Date().toISOString(), prompts: {} };
+    const out = {
+        version: 2,
+        lang,
+        exportedAt: new Date().toISOString(),
+        chatLang: chatConfig?.chatLang || lang,
+        // Sensitive — treat export files like secrets.
+        mistralApiKeys: normalizeMistralApiKeys(chatConfig?.mistralApiKeys),
+        prompts: {},
+    };
     for (const id of Object.keys(DEFAULT_PROMPTS)) {
         out.prompts[id] = {
             custom: custom[id] ?? null,
@@ -49,13 +58,23 @@ export function exportPrompts(chatConfig, lang = 'pl') {
     return out;
 }
 
+/**
+ * @returns {{ prompts: object, mistralApiKeys: {label:string,key:string}[], chatLang?: string }}
+ */
 export function importPrompts(chatConfig, data) {
     if (!data?.prompts) throw new Error('Invalid prompt export format');
     const merged = { ...getPromptsFromConfig(chatConfig) };
     for (const [id, entry] of Object.entries(data.prompts)) {
         if (entry?.custom) merged[id] = entry.custom;
     }
-    return merged;
+    const mistralApiKeys = data.mistralApiKeys?.length
+        ? normalizeMistralApiKeys(data.mistralApiKeys)
+        : normalizeMistralApiKeys(chatConfig?.mistralApiKeys);
+    return {
+        prompts: merged,
+        mistralApiKeys,
+        chatLang: data.chatLang || chatConfig?.chatLang,
+    };
 }
 
 export { DEFAULT_PROMPTS, getDefaultPrompt };

@@ -29,3 +29,29 @@ export async function persistSettings(s) {
 export function getShuffledMistralApiKeys(cfg) {
     return ((cfg?.mistralApiKeys) || []).filter(k => k.key).slice();
 }
+
+/** Normalize key objects for export/import. */
+export function normalizeMistralApiKeys(keys) {
+    if (!Array.isArray(keys)) return [];
+    return keys.map(k => {
+        if (typeof k === 'string') {
+            return { label: 'Imported', key: k.trim() };
+        }
+        return {
+            label: String(k?.label || '').trim() || 'Key',
+            key:   String(k?.key || '').trim(),
+        };
+    }).filter(k => k.key);
+}
+
+/** Merge incoming keys without duplicates (by key value). */
+export function mergeMistralApiKeys(existing, incoming) {
+    const out  = normalizeMistralApiKeys(existing);
+    const seen = new Set(out.map(k => k.key));
+    for (const k of normalizeMistralApiKeys(incoming)) {
+        if (seen.has(k.key)) continue;
+        out.push(k);
+        seen.add(k.key);
+    }
+    return out;
+}

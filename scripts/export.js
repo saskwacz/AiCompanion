@@ -5,6 +5,7 @@ import { getMemoryForChat, saveMemory, memoryForExport, memoryFromImport } from 
 import { getSummaryState, saveSummaryState,
          summaryForExport, summaryFromImport }              from './summary.js';
 import { normalizeChatConfig }                             from './chat-config.js';
+import { loadSettings, persistSettings, normalizeMistralApiKeys, mergeMistralApiKeys } from './settings.js';
 
 // ============ HELPERS ============
 /** Convert Blob to base64 string */
@@ -43,17 +44,21 @@ export async function exportChat(chatId) {
     const character    = await getCharacterById(chat.characterId);
     const avatarBlob   = await getCharacterAvatar(chat.characterId);
     const avatarBase64 = await blobToBase64(avatarBlob);
+    const chatConfig   = normalizeChatConfig(chat.config);
+    const globalSettings = await loadSettings();
 
     const data = {
-        version:    6,
+        version:    7,
         exportedAt: new Date().toISOString(),
+        // Sensitive — treat export files like secrets.
+        mistralApiKeys:       normalizeMistralApiKeys(chatConfig.mistralApiKeys),
+        globalMistralApiKeys: normalizeMistralApiKeys(globalSettings.mistralApiKeys),
         character:  { ...character, id: undefined, avatarBase64 },
         chat: {
             ...chat,
             id:          undefined,
             characterId: undefined,
-            // Per-chat Mistral config. API keys are included — treat export files as sensitive.
-            config: normalizeChatConfig(chat.config),
+            config: chatConfig,
         },
         messages: messages.map(m => ({
             role:      m.role,
@@ -110,6 +115,26 @@ export function importChatFromFile(file) {
 
                 // Re-create chat — normalize config (legacy formats → Mistral-only)
                 const importedConfig = normalizeChatConfig(data.chat?.config ?? null);
+                const chatKeys = normalizeMistralApiKeys(
+                    data.mistralApiKeys
+                    ?? importedConfig.mistralApiKeys
+                    ?? data.chat?.config?.mistralApiKeys
+                    ?? data.chat?.config?.apiKeys,
+                );
+                if (chatKeys.length) {
+                    importedConfig.mistralApiKeys = chatKeys;
+                } else if (data.globalMistralApiKeys?.length) {
+                    importedConfig.mistralApiKeys = normalizeMistralApiKeys(data.globalMistralApiKeys);
+                }
+
+                if (data.globalMistralApiKeys?.length) {
+                    const settings = await loadSettings();
+                    await persistSettings({
+                        ...settings,
+                        mistralApiKeys: mergeMistralApiKeys(settings.mistralApiKeys, data.globalMistralApiKeys),
+                    });
+                }
+
                 const chat = await createChat(character.id, importedConfig);
                 await updateChat(chat.id, {
                     title:           data.chat?.title  || 'Imported Chat',
